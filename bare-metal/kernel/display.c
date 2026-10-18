@@ -101,6 +101,7 @@ static struct {
 	uint64_t dark_ms, total_ms;
 	uint32_t vo_pwr, vo_idle;   // the display power domain, as we found it
 	int vo_ok;                  // and whether it's on now
+	int vo_power_failed;        // (if not: 1 = no power, 0 = bus stayed idle)
 	int done;
 } log;
 
@@ -183,6 +184,26 @@ static void clocks(void)
 	masked(CLKSEL(5), 3U << 14 | 1U << 11 | 0xff, 20 - 1);
 }
 
+// Without U-Boot: every clock of the VO power domain must be running
+// before the domain can power up (Linux enables all 11 of them first).
+// Some may come from a PLL that isn't running yet, so point each one at a
+// source that is: CPLL (just set up by clocks()) or the 24 MHz crystal.
+// Fields from Linux's clk-px30.c.
+static void vo_clocks(void)
+{
+	// aclk_vo_pre (the domain's bus): CLKSEL3 [7:6] source (1 = CPLL),
+	// [4:0] divider-1: 580 / 2 = 290 MHz. Its halves hclk [11:8] and
+	// pclk [15:12]: / 2 and / 4.
+	masked(CLKSEL(3), 0xffdf, 1U << 6 | 1 | 1U << 8 | 3U << 12);
+	// clk_rga_core: CLKSEL4 [7:6] = CPLL, / 2
+	masked(CLKSEL(4), 0xdf, 1U << 6 | 1);
+	// clk_vopb_pwm: CLKSEL7 bit 7 = crystal
+	masked(CLKSEL(7), 0xff, 1U << 7);
+	// the little VOP's pixel clock: CLKSEL8 [15:14] = straight from the
+	// crystal (we don't use that VOP; it just has to tick)
+	masked(CLKSEL(8), 3U << 14, 2U << 14);
+}
+
 // The chip can switch whole blocks off to save power ("power domains").
 // The VOP and the DSI host sit in the VO domain. Off, or with its bus
 // connection asked to go idle, every access to them faults. Linux's
@@ -200,6 +221,7 @@ static void vo_power_on(void)
 	wr(PMU + 0x64, rd(PMU + 0x64) & ~(1U << 7));
 	int64_t awake = wait_for(PMU + 0x6c, 1U << 7 | 1U << 23, 0, 10000);
 	log.vo_ok = on >= 0 && awake >= 0;
+	log.vo_power_failed = on < 0;
 }
 
 // Every clock gate for the display open, as U-Boot left them: the VOP's
@@ -341,7 +363,8 @@ static void long_flashes(uint32_t n)
 //                 3 = in the PHY, 4 = somewhere else
 //   second group: 1 = the display's power domain was on when we started,
 //                 2 = it was off or idle and we switched it on,
-//                 3 = it wouldn't come on
+//                 3 = it wouldn't power up, 4 = powered, but its bus
+//                 connection stayed idle
 static void report(void)
 {
 	if (!flashing)
@@ -353,7 +376,7 @@ static void report(void)
 	}
 	long_flashes(where);
 	int was_on = !(log.vo_pwr & 1U << 13) && !(log.vo_idle & (1U << 7 | 1U << 23));
-	long_flashes(!log.vo_ok ? 3 : was_on ? 1 : 2);
+	long_flashes(!log.vo_ok ? (log.vo_power_failed ? 3 : 4) : was_on ? 1 : 2);
 	delay_ms(1500);
 }
 
@@ -364,12 +387,19 @@ void display_start(int running)
 	flashing = !running;
 	survive_faults = !running;
 	backlight_set(0);
-	open_gates();    // (clocks running while the domain powers up)
-	vo_power_on();
-	shut_down(running);
-	step_done();     // 2: clock gates open, panel off
-	clocks();
-	step_done();     // 3: CPLL and the pixel clock set
+	open_gates();
+	if (running) {   // as tested under U-Boot: its clocks are all running
+		vo_power_on();
+		shut_down(running);
+		clocks();
+	} else {         // from cold: clocks first, then the power domain
+		clocks();
+		vo_clocks();
+		vo_power_on();
+		shut_down(running);
+	}
+	step_done();     // 2: clocks set, panel off
+	step_done();     // 3: (kept, so the flash count still means the same)
 	delay_ms(1);
 	masked(SOFTRST(3), 1U << 4 | 1U << 5 | 1U << 13 | 1U << 14, 0);   // out of reset
 	delay_ms(200);   // let the panel's power drain away completely
