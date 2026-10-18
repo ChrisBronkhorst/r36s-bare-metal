@@ -1,4 +1,4 @@
-// Milestone 7: button interrupts.
+// Milestone 8: the backlight.
 //
 // First the kernel describes the machine it woke up on: which CPU, which
 // privilege level, the timer, the screen U-Boot handed us, and the device
@@ -11,8 +11,12 @@
 // switches on interrupts: the timer interrupts 60 times a second, and in
 // between, the CPU sleeps. On the button test the timer slows to once a
 // second, and the buttons themselves interrupt (and wake) the CPU.
+//
+// On the info page, VOL+ and VOL- set the backlight, and it switches off by
+// itself after 30 seconds without a button press.
 
 #include <stdint.h>
+#include "backlight.h"
 #include "buttons.h"
 #include "console.h"
 #include "exception.h"
@@ -127,6 +131,17 @@ static void interrupts_on(void)
 static uint64_t now(void)
 {
 	return READ_SYSREG(cntpct_el0);
+}
+
+static void show_light(uint32_t row, uint32_t percent, int dark)
+{
+	console_goto(8, row);
+	console_color(WHITE);
+	if (dark)
+		kprintf("off (press to wake)       ");
+	else
+		kprintf("%u%%, duty %u of %u   ", percent, backlight_period() * percent / 100,
+			backlight_period());
 }
 
 static void speed_line(const char *name, uint64_t off, uint64_t on)
@@ -337,9 +352,8 @@ void kmain(uintptr_t device_tree)
 	buttons_init();
 	buttons_irq_init();
 
-	kputc('\n');
 	console_color(YELLOW);
-	kputs("Press any button to test the buttons\n");
+	kputs("A: button test   VOL+/-: brightness\n");
 	uint32_t row = console_row();
 	label("Running");
 	console_goto(0, row + 1);
@@ -348,6 +362,11 @@ void kmain(uintptr_t device_tree)
 	label("Late");
 	console_goto(0, row + 3);
 	label("Awake");
+	console_goto(0, row + 4);
+	label("Light");
+	backlight_init();
+	uint32_t light = backlight_get();
+	show_light(row + 4, light, 0);
 
 	// Did the timer interrupt arrive? Give it a fifth of a second.
 	uint64_t t = now();
@@ -364,10 +383,42 @@ void kmain(uintptr_t device_tree)
 	// A clock driven by the timer interrupt. Between ticks the CPU sleeps
 	// (wfi); we add up how long, to see how much of the time it's awake.
 	uint64_t asleep = 0, since = now(), shown = ~0UL;
-	while (!buttons_pressed()) {
+	uint64_t last_press = now();
+	uint32_t held = buttons_pressed();
+	int dark = 0;
+	for (;;) {
 		uint64_t before_wfi = now();
 		wait();
 		asleep += now() - before_wfi;
+
+		uint32_t pressed = buttons_pressed();
+		uint32_t down = pressed & ~held;   // just pressed
+		held = pressed;
+		if (down) {
+			last_press = now();
+			if (dark) {   // the first press only switches the light back on
+				dark = 0;
+				backlight_set(light);
+				show_light(row + 4, light, 0);
+				down = 0;
+			}
+		}
+		if (down & bit_of("A"))
+			break;
+		if (down & (bit_of("VOL+") | bit_of("VOL-"))) {
+			if (down & bit_of("VOL+"))
+				light = light >= 90 ? 100 : light + 10;
+			else
+				light = light <= 20 ? 10 : light - 10;   // not 0: you'd see nothing
+			backlight_set(light);
+			show_light(row + 4, light, 0);
+		}
+		if (!dark && now() - last_press > 30 * ticks_per_second) {
+			dark = 1;
+			backlight_set(0);
+			show_light(row + 4, light, 1);
+		}
+
 		uint64_t ticks = timer_ticks;
 		if (ticks == shown)
 			continue;
