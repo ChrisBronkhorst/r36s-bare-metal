@@ -9,7 +9,8 @@ LD = ld.lld
 # -mgeneral-regs-only: no floating point/SIMD registers (not set up yet)
 # -mstrict-align: no unaligned memory accesses (they fault on device memory,
 #   which is all memory before the MMU is on, and the hardware registers after)
-CFLAGS = -O2 -Wall -Wextra -ffreestanding -fno-builtin -nostdlib \
+# make FLASHES=1: the backlight flashes once per display start-up step
+CFLAGS = $(if $(FLASHES),-DFLASHES) -O2 -Wall -Wextra -ffreestanding -fno-builtin -nostdlib \
 	-mgeneral-regs-only -mstrict-align -fno-stack-protector \
 	-fno-asynchronous-unwind-tables
 
@@ -27,7 +28,7 @@ uboot.img: kernel.img pack-loader.py
 kernel.elf: $(OBJS) linker.ld
 	$(LD) -T linker.ld -o $@ $(OBJS)
 
-$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h board.h monitor.h ram.h ../spl/sd.h ../ddr/report.h
+$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h board.h monitor.h ram.h ../spl/sd.h ../ddr/report.h ../spl/report.h
 
 sd.o: ../spl/sd.c ../spl/sd.h
 	$(CC) $(CFLAGS) -c $< -o $@

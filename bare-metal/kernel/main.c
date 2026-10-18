@@ -575,6 +575,7 @@ static void own_screen(void)
 
 	if (board_init() != 0)
 		return;   // no power chip: no backlight, no panel. Stay dark.
+#ifdef FLASHES
 	backlight_set(100);   // flash 1: the power chip answered
 	uint64_t t = now();
 	while (now() - t < 24000000 / 1000 * 150)
@@ -582,12 +583,16 @@ static void own_screen(void)
 	backlight_set(0);
 	while (now() - t < 24000000 / 1000 * 600)
 		;
-	display_start(0);     // flashes 2-8, one per step, then the picture
+#endif
+	display_start(0);     // (flashes 2-8, one per step,) then the picture
 }
 
 // uboot = 1 if U-Boot loaded us, 0 if Rockchip's loader did (start.S)
+uint64_t boot_kernel, boot_menu;   // boot timeline: we started, menu ready
+
 void kmain(uintptr_t device_tree, uint64_t uboot)
 {
+	boot_kernel = now();
 	vectors_install();   // from here on, crashes come to us, not U-Boot
 
 	if (!uboot)
@@ -643,6 +648,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 
 	// A clock driven by the timer interrupt. Between ticks the CPU sleeps
 	// (wfi); we add up how long, to see how much of the time it's awake.
+	boot_menu = now();
 	uint64_t asleep = 0, since = now(), shown = ~0UL;
 	uint64_t last_press = now();
 	uint32_t held = buttons_pressed();

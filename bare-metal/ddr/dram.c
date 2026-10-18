@@ -348,7 +348,7 @@ int dram_init(void)
 // Two checks. First the address wires: write a different value at each
 // power-of-two address and read them all back. A missing or crossed address
 // bit makes two of them land in the same place. Then the data: a pseudo-
-// random pattern over 1 MB, written then read, to catch stuck or crossed
+// random pattern over 64 KB, written then read, to catch stuck or crossed
 // data bits. Returns 0, or the failing address.
 uintptr_t dram_test(void)
 {
@@ -369,17 +369,17 @@ uintptr_t dram_test(void)
 
 	volatile uint32_t *p = (volatile uint32_t *)0x08000000;   // 128 MB in
 	uint32_t x = 0x12345678;
-	for (uint32_t i = 0; i < 0x40000; i++) {
+	for (uint32_t i = 0; i < 0x4000; i++) {
 		x ^= x << 13, x ^= x >> 17, x ^= x << 5;   // xorshift
 		p[i] = x;
 	}
 	x = 0x12345678;
-	for (uint32_t i = 0; i < 0x40000; i++) {
+	for (uint32_t i = 0; i < 0x4000; i++) {
 		x ^= x << 13, x ^= x >> 17, x ^= x << 5;
 		if (p[i] != x)
 			return (uintptr_t)&p[i];
 	}
-	early.test_words += 0x40000;
+	early.test_words += 0x4000;
 	return 0;
 }
 

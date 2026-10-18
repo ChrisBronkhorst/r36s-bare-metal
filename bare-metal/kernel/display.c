@@ -351,13 +351,18 @@ static void check(void)
 	log.errors1 = rd(DSI + DSI_INT_ST1);
 }
 
-// Without U-Boot there's no picture until the end, so the backlight
-// reports progress: one flash after each step. N flashes and then dark
-// = stuck in step N + 1. (Flash 1 is the power chip, in main.c.)
+// Without U-Boot there's no picture until the end, so the backlight can
+// report progress: one flash after each step. N flashes and then dark
+// = stuck in step N + 1. (Flash 1 is the power chip, in main.c.) They cost
+// almost 5 seconds, so only when built with `make FLASHES=1`.
 static int flashing;
+uint64_t boot_picture;   // when the picture came on (boot timeline)
 
 static void step_done(void)
 {
+#ifndef FLASHES
+	return;
+#endif
 	if (!flashing)
 		return;
 	backlight_set(100);
@@ -407,6 +412,7 @@ void display_start(int running)
 	log.total_ms = (now() - start) / 24000;
 	check();
 	log.done = 1;
+	boot_picture = now();
 }
 
 static void row(const char *name, int ok)

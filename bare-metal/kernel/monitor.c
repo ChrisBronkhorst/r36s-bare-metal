@@ -152,6 +152,27 @@ void monitor_page(void)
 // report in memory at a fixed address, marked with a magic number.
 
 #include "../spl/report.h"
+#include "../ddr/report.h"
+
+extern uint64_t boot_kernel, boot_picture, boot_menu;
+
+static uint64_t ms(uint64_t ticks) { return ticks / 24000; }
+
+// Every stage reads the same counter (started by our RAM setup, the
+// first of them), so their times line up. Before that: the boot ROM.
+static void timeline(const struct spl_report *r)
+{
+	const struct ddr_report *d = (const struct ddr_report *)DDR_REPORT;
+	label("Timeline");
+	if (d->magic == DDR_MAGIC)
+		kprintf("RAM %lu-%lu ms, SPL %lu-%lu\n", ms(d->ticks_in), ms(d->ticks_out),
+			ms(r->ticks_in), ms(r->ticks_out));
+	else
+		kprintf("SPL %lu-%lu ms\n", ms(r->ticks_in), ms(r->ticks_out));
+	label("");
+	kprintf("kernel %lu, picture %lu, menu %lu\n", ms(boot_kernel), ms(boot_picture),
+		ms(boot_menu));
+}
 
 const struct spl_report *spl_report(void)
 {
@@ -212,6 +233,7 @@ void spl_page(void)
 		label("");
 		kprintf("mode %04x %04x sel0 %04x\n", r->cru_mode & 0xffff, r->pmucru_mode & 0xffff,
 			r->clksel0 & 0xffff);
+		timeline(r);
 	}
 	console_goto(0, 22);
 	console_color(YELLOW);
