@@ -10,10 +10,13 @@
 #   ./card-loader.sh uboot    the originals: U-Boot, ATF and OP-TEE
 #   ./card-loader.sh ramdump  copy the RAM registers the kernel saved (RAM page,
 #                             Y) to dumps/, and print them
+#   ./card-loader.sh romdump  the same for the boot ROM (R1 page, Y), and
+#                             disassemble it
 #
 # The card's boot area (before the first partition):
 #   sector    64  Rockchip's RAM setup + loader      <- swapped: RAM setup + our SPL
 #   sector 12288  the kernel's RAM register dump (32 KB), when saved
+#   sector 12416  the kernel's boot ROM dump (64 KB + a header), when saved
 #   sector 16384  "uboot.img": U-Boot, 4 copies      <- swapped: our kernel
 #   sector 24576  "trust.img": ATF and OP-TEE, 2 copies <- swapped: our monitor
 #   sector 32768  the BOOT partition
@@ -21,7 +24,7 @@
 set -e
 cd "$(dirname "$0")"
 what=$1
-case "$what" in ddr|spl|monitor|ours|uboot|ramdump) ;; *) echo "usage: $0 ddr|spl|monitor|ours|uboot|ramdump"; exit 1 ;; esac
+case "$what" in ddr|spl|monitor|ours|uboot|ramdump|romdump) ;; *) echo "usage: $0 ddr|spl|monitor|ours|uboot|ramdump|romdump"; exit 1 ;; esac
 
 boot=/Volumes/BOOT
 [ -f "$boot/boot.ini" ] || { echo "No BOOT partition mounted at $boot. Is the card in?"; exit 1; }
@@ -60,6 +63,37 @@ if [ "$what" = ramdump ]; then
   python3 -I ram-dump.py "$out" > "${out%.bin}.txt" || { echo "No dump on the card yet."; rm -f "$out" "${out%.bin}.txt"; exit 1; }
   [ -n "$SUDO_USER" ] && chown "$SUDO_USER" "${out%.bin}.txt"
   echo "Saved $out and ${out%.bin}.txt"
+  sync
+  diskutil eject "$disk" >/dev/null && echo "Ejected."
+  exit 0
+fi
+if [ "$what" = romdump ]; then
+  mkdir -p dumps
+  out=dumps/bootrom-$(date +%Y%m%d-%H%M%S)
+  dd if=$raw of="$tmp/rom" bs=512 skip=12416 count=129 2>/dev/null
+  python3 -I rom-dump.py "$tmp/rom" "$out.bin" > "$out.txt" || { echo "No ROM dump on the card yet."; rm -f "$out.bin" "$out.txt"; exit 1; }
+  # AArch64 code, as if loaded at 0xffff0000
+  llvm=$(xcrun -f llvm-objdump 2>/dev/null || echo objdump)
+  python3 -I - "$out.bin" "$out.o" <<'PY'
+import sys
+# Wrap the raw ROM in a minimal ELF so objdump knows it's AArch64 code at 0xffff0000
+rom = open(sys.argv[1], "rb").read()
+import struct
+shstr = b"\0.text\0.shstrtab\0"
+eh = 64; text_off = eh; str_off = text_off + len(rom); sh_off = (str_off + len(shstr) + 7) & ~7
+hdr = struct.pack("<4sBBBBB7xHHIQQQIHHHHHH", b"\x7fELF", 2, 1, 1, 0, 0, 1, 183, 1, 0, 0, sh_off, 0, 64, 0, 0, 64, 3, 2)
+null = bytes(64)
+text = struct.pack("<IIQQQQIIQQ", 1, 1, 6, 0xffff0000, text_off, len(rom), 0, 0, 4, 0)
+strs = struct.pack("<IIQQQQIIQQ", 7, 3, 0, 0, str_off, len(shstr), 0, 0, 1, 0)
+body = hdr + rom + shstr
+body += bytes(sh_off - len(body)) + null + text + strs
+open(sys.argv[2], "wb").write(body)
+PY
+  "$llvm" -d "$out.o" > "$out.s" 2>&1 || echo "(disassembly failed)"
+  rm -f "$out.o"
+  [ -n "$SUDO_USER" ] && chown "$SUDO_USER" dumps "$out".*
+  cat "$out.txt" | head -12
+  echo "Saved $out.bin (the ROM), .txt (its text) and .s (disassembly)"
   sync
   diskutil eject "$disk" >/dev/null && echo "Ejected."
   exit 0

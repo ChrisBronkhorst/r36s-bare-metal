@@ -14,6 +14,7 @@
 #define PSCI_VERSION 0x84000000
 #define SMC_HELLO    0xc200ff00
 #define SMC_REPORT   0xc200ff01
+#define SMC_ROM_READ 0xc200ff02
 #define HELLO_MAGIC  0x4d4f4e49544f52UL   // "MONITOR"
 
 // The report's entries, in the monitor's order (monitor/main.c)
@@ -42,6 +43,15 @@ static uint64_t smc(uint64_t fn, uint64_t arg, uint64_t *second)
 int monitor_ours(void)
 {
 	return smc(SMC_HELLO, 0, 0) == HELLO_MAGIC;
+}
+
+// One word of the boot ROM, read by the monitor from the secure world
+uint32_t monitor_rom_read(uint32_t offset, int *ok)
+{
+	uint64_t read;
+	uint32_t v = (uint32_t)smc(SMC_ROM_READ, offset, &read);
+	*ok = read == 1;
+	return v;
 }
 
 static void label(const char *name)

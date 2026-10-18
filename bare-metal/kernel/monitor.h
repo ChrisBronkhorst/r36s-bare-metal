@@ -11,3 +11,4 @@ void monitor_peek(uint32_t row);
 struct spl_report;
 const struct spl_report *spl_report(void);
 void spl_page(void);
+uint32_t monitor_rom_read(uint32_t offset, int *ok);

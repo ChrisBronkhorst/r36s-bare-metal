@@ -30,6 +30,7 @@
 #include "mmu.h"
 #include "monitor.h"
 #include "ram.h"
+#include "rom.h"
 #include "rk817.h"
 #include "scan.h"
 #include "screen.h"
@@ -438,9 +439,10 @@ static void scan_page(void)
 }
 
 // What Rockchip's RAM setup did; Y saves its registers to the card
-static void ram_screen(void)
+// A page with something to save to the card (Y): the RAM registers, the ROM
+static void save_screen(void (*page)(void), const char *(*save)(void), const char *saved)
 {
-	ram_page();
+	page();
 	for (;;) {
 		uint32_t down = next_press();
 		if (down & bit_of("A"))
@@ -449,10 +451,10 @@ static void ram_screen(void)
 			console_goto(0, 21);
 			console_color(YELLOW);
 			kputs("Saving...                     ");
-			const char *err = ram_save();
+			const char *err = save();
 			console_goto(0, 21);
 			console_color(err ? ALERT : GREEN);
-			kprintf("%s                ", err ? err : "Saved to sector 12288");
+			kprintf("%s                ", err ? err : saved);
 			if (err) {
 				console_goto(0, 19);
 				console_color(WHITE);
@@ -632,7 +634,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	buttons_irq_init();
 
 	console_color(YELLOW);
-	kputs("A keys B power X LCD Y I2C START EL3\nSELECT RAM\n");
+	kputs("A keys B power X LCD Y I2C START EL3\nSELECT RAM R1 boot ROM\n");
 	uint32_t row = console_row();
 	label("Running");
 	console_goto(0, row + 1);
@@ -733,7 +735,9 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	else if (chosen & bit_of("START"))
 		el3_page();
 	else if (chosen & bit_of("SEL"))
-		ram_screen();
+		save_screen(ram_page, ram_save, "Saved to sector 12288");
+	else if (chosen & bit_of("R1"))
+		save_screen(rom_page, rom_save, "Saved to sector 12416");
 	button_test();
 }
 

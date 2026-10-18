@@ -70,6 +70,9 @@ static uint64_t report[R_COUNT];
 #define PSCI_FEATURES     0x8400000a
 #define SMC_HELLO         0xc200ff00   // ours: who's there?
 #define SMC_REPORT        0xc200ff01   // ours: x1 = index -> x0 = report[x1]
+#define SMC_ROM_READ      0xc200ff02   // ours: x1 = offset -> x0 = boot ROM word, x1 = 1 if read
+#define BOOT_ROM          0xffff0000UL
+#define BOOT_ROM_SIZE     0x10000UL
 #define HELLO_MAGIC       0x4d4f4e49544f52UL   // "MONITOR" in ASCII
 #define NOT_SUPPORTED     (~0UL)       // -1, for PSCI and unknown calls alike
 
@@ -271,6 +274,8 @@ static void system_reset(void)
 }
 
 // x[0..30]: the kernel's registers at the `smc`. Results go in x0-x3.
+uint32_t probe_read(uint64_t address, uint32_t *ok);   // start.S
+
 void smc_handler(uint64_t *x)
 {
 	uint64_t esr = SYSREG(esr_el3);
@@ -301,6 +306,12 @@ void smc_handler(uint64_t *x)
 	case SMC_REPORT:
 		x[0] = x[1] < R_COUNT ? report[x[1]] : NOT_SUPPORTED;
 		break;
+	case SMC_ROM_READ: {   // the boot ROM, read from the secure world
+		uint32_t ok = 0;
+		x[0] = x[1] < BOOT_ROM_SIZE ? probe_read(BOOT_ROM + (x[1] & ~3UL), &ok) : 0;
+		x[1] = ok;
+		break;
+	}
 	default:   // includes SYSTEM_OFF: that needs the power chip, over I2C
 		x[0] = NOT_SUPPORTED;
 		break;

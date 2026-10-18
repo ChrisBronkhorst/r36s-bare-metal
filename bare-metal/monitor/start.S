@@ -157,7 +157,35 @@ smc_entry:
 // A crash during our start-up: note it, then start the kernel anyway, so
 // it can show what happened (it asks us with an `smc`).
 crashed:
-	adr	x1, __stack_top
+	// A refused read in probe_read (below)? Then not a crash: carry on
+	// at probe_fault. (The vector only changed x0; this, x1 and x2.)
+	mrs	x1, elr_el3
+	adr	x2, probe_load
+	cmp	x1, x2
+	b.ne	1f
+	adr	x2, probe_fault
+	msr	elr_el3, x2
+	eret
+1:	adr	x1, __stack_top
 	mov	sp, x1
 	bl	monitor_crashed		// returns where the kernel starts, or never
 	b	enter_kernel
+
+// uint32_t probe_read(uint64_t address, uint32_t *ok)
+// Read one word that might be refused. If it is, the abort lands in
+// `crashed`, which sends us on to probe_fault: *ok = 0 instead of a crash.
+// Only x9-x12 here, which the crash path leaves alone.
+.global probe_read
+probe_read:
+	mov	x9, x0
+	mov	x10, x1
+probe_load:
+	ldr	w11, [x9]
+	mov	w12, #1
+	b	1f
+probe_fault:
+	mov	w11, #0
+	mov	w12, #0
+1:	str	w12, [x10]
+	mov	w0, w11
+	ret
