@@ -65,6 +65,11 @@ static uint32_t pll_khz(uintptr_t con, uint32_t mode)
 	return (24000ULL * fb + (24000ULL * frac >> 24)) / ref / post1 / post2;
 }
 
+uint32_t dpll_khz(void)
+{
+	return pll_khz(CRU + 0x20, rd(CRU + 0xa0) >> 4 & 3);
+}
+
 uint32_t gpll_khz(void)
 {
 	return pll_khz(PMUCRU + 0x00, rd(PMUCRU + 0x20) & 3);

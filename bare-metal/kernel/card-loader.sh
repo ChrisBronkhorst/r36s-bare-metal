@@ -6,9 +6,12 @@
 #   ./card-loader.sh monitor  our kernel, and our monitor at EL3 (no U-Boot, no ATF)
 #   ./card-loader.sh ours     our kernel instead of U-Boot, ARM Trusted Firmware at EL3
 #   ./card-loader.sh uboot    the originals: U-Boot, ATF and OP-TEE
+#   ./card-loader.sh ramdump  copy the RAM registers the kernel saved (RAM page,
+#                             Y) to dumps/, and print them
 #
 # The card's boot area (before the first partition):
 #   sector    64  Rockchip's RAM setup + loader      <- swapped: RAM setup + our SPL
+#   sector 12288  the kernel's RAM register dump (32 KB), when saved
 #   sector 16384  "uboot.img": U-Boot, 4 copies      <- swapped: our kernel
 #   sector 24576  "trust.img": ATF and OP-TEE, 2 copies <- swapped: our monitor
 #   sector 32768  the BOOT partition
@@ -16,7 +19,7 @@
 set -e
 cd "$(dirname "$0")"
 what=$1
-case "$what" in spl|monitor|ours|uboot) ;; *) echo "usage: $0 spl|monitor|ours|uboot"; exit 1 ;; esac
+case "$what" in spl|monitor|ours|uboot|ramdump) ;; *) echo "usage: $0 spl|monitor|ours|uboot|ramdump"; exit 1 ;; esac
 
 boot=/Volumes/BOOT
 [ -f "$boot/boot.ini" ] || { echo "No BOOT partition mounted at $boot. Is the card in?"; exit 1; }
@@ -47,6 +50,18 @@ assert first >= 32768, "partition 1 starts at sector %d, inside the boot area" %
 assert h[16384 * 512:][:8] == b"LOADER  ", "no LOADER image at sector 16384"
 assert h[24576 * 512:][:4] == b"BL3X", "no trust image at sector 24576"
 PY
+if [ "$what" = ramdump ]; then
+  mkdir -p dumps
+  out=dumps/ram-$(date +%Y%m%d-%H%M%S).bin
+  dd if=$raw of="$out" bs=512 skip=12288 count=64 2>/dev/null
+  [ -n "$SUDO_USER" ] && chown "$SUDO_USER" dumps "$out"
+  python3 -I ram-dump.py "$out" > "${out%.bin}.txt" || { echo "No dump on the card yet."; rm -f "$out" "${out%.bin}.txt"; exit 1; }
+  [ -n "$SUDO_USER" ] && chown "$SUDO_USER" "${out%.bin}.txt"
+  echo "Saved $out and ${out%.bin}.txt"
+  sync
+  diskutil eject "$disk" >/dev/null && echo "Ejected."
+  exit 0
+fi
 make uboot.img >/dev/null
 make -C ../monitor trust.img >/dev/null
 make -C ../spl idbloader.img >/dev/null

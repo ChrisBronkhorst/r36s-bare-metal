@@ -42,6 +42,7 @@
 #define C_CRC        (1U << 8)    // check the answer's CRC
 #define C_DATA       (1U << 9)    // data follows, on the DAT wires
 #define C_AUTO_STOP  (1U << 12)   // send CMD12 (stop) after the last block
+#define C_WRITE      (1U << 10)   // data goes to the card, not from it
 #define C_WAIT_PREV  (1U << 13)   // wait for the previous data to finish
 #define C_INIT       (1U << 15)   // 80 clocks first: wakes the card up
 #define C_CLOCK_ONLY (1U << 21)   // no command, just load the new clock setup
@@ -258,5 +259,49 @@ int sd_read(uint32_t sector, uint32_t count, void *dst)
 	if (rd(SD + RINTSTS) & I_DATA_ERRS)
 		return -1;
 	sd.sectors_read += count;
+	return 0;
+}
+
+// Write `count` 512-byte sectors from `src`, starting at `sector`.
+// CMD25 WRITE_MULTIPLE_BLOCK: the mirror image of reading. We fill the FIFO
+// as it empties; afterwards the card holds DAT0 low ("busy") while it
+// programs its flash, and we wait for that too.
+int sd_write(uint32_t sector, uint32_t count, const void *src)
+{
+	uint32_t r[4];
+	const volatile uint32_t *in = src;
+	uint32_t words = count * 128;
+
+	wr(SD + CTRL, rd(SD + CTRL) | 2);   // empty the FIFO first
+	if (wait_for(SD + CTRL, 2, 0, 100))
+		return -1;
+	wr(SD + BLKSIZ, 512);
+	wr(SD + BYTCNT, count * 512);
+	uint32_t addr = sd.high_capacity ? sector : sector * 512;
+	uint32_t err = count == 1 ? command(24, addr, R1 | C_DATA | C_WRITE | C_WAIT_PREV, r)
+				  : command(25, addr, R1 | C_DATA | C_WRITE | C_WAIT_PREV | C_AUTO_STOP, r);
+	if (err)
+		return -1;
+	uint64_t t = ticks();
+	while (words) {
+		uint32_t status = rd(SD + RINTSTS);
+		if (status & I_DATA_ERRS) {
+			sd.last_status = status;
+			return -1;
+		}
+		if (rd(SD + STATUS) & 1U << 3) {   // FIFO full: wait
+			if (ticks() - t > 1000 * MS)
+				return -1;
+			continue;
+		}
+		wr(SD + DATA, *in++);
+		words--;
+	}
+	if (wait_for(SD + RINTSTS, I_DATA_OVER, I_DATA_OVER, 2000))
+		return -1;
+	if (rd(SD + RINTSTS) & I_DATA_ERRS)
+		return -1;
+	if (wait_for(SD + STATUS, 1U << 9, 0, 2000))   // the card's busy signal
+		return -1;
 	return 0;
 }

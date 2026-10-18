@@ -15,6 +15,7 @@
 #define GREY   0x8090a0
 #define YELLOW 0xf0d020
 #define GREEN  0x60d070
+#define ALERT  0xf05050
 
 void console_init(uint32_t fg, uint32_t bg);   // clears the screen
 void console_color(uint32_t fg);

@@ -14,3 +14,4 @@ extern struct sd_info sd;
 
 int sd_init(void);   // 0 when the card is ready to read
 int sd_read(uint32_t sector, uint32_t count, void *dst);   // 0 on success
+int sd_write(uint32_t sector, uint32_t count, const void *src);   // 0 on success

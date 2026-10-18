@@ -29,6 +29,7 @@
 #include "gpio.h"
 #include "mmu.h"
 #include "monitor.h"
+#include "ram.h"
 #include "rk817.h"
 #include "scan.h"
 #include "screen.h"
@@ -432,6 +433,27 @@ static void scan_page(void)
 	let_go();
 }
 
+// What Rockchip's RAM setup did; Y saves its registers to the card
+static void ram_screen(void)
+{
+	ram_page();
+	for (;;) {
+		uint32_t down = next_press();
+		if (down & bit_of("A"))
+			break;
+		if (down & bit_of("Y")) {
+			console_goto(0, 21);
+			console_color(YELLOW);
+			kputs("Saving...                     ");
+			const char *err = ram_save();
+			console_goto(0, 21);
+			console_color(err ? ALERT : GREEN);
+			kprintf("%s                ", err ? err : "Saved to sector 12288");
+		}
+	}
+	let_go();
+}
+
 // What's at EL3 (Y tries to read the monitor's memory); R: our SPL
 static void el3_page(void)
 {
@@ -587,7 +609,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	buttons_irq_init();
 
 	console_color(YELLOW);
-	kputs("A keys B power X LCD Y I2C START EL3\n");
+	kputs("A keys B power X LCD Y I2C START EL3\nSELECT RAM\n");
 	uint32_t row = console_row();
 	label("Running");
 	console_goto(0, row + 1);
@@ -637,7 +659,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 				down = 0;
 			}
 		}
-		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y") | bit_of("START")))
+		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y") | bit_of("START") | bit_of("SEL")))
 			break;
 		if (down & (bit_of("VOL+") | bit_of("VOL-"))) {
 			if (down & bit_of("VOL+"))
@@ -686,6 +708,8 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 		scan_page();
 	else if (chosen & bit_of("START"))
 		el3_page();
+	else if (chosen & bit_of("SEL"))
+		ram_screen();
 	button_test();
 }
 
