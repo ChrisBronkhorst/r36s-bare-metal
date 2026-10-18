@@ -44,3 +44,34 @@ For SD (and eMMC) copy n's header is at sector 64 | n << 10:
 be SHA-256 hashed (+0x3d30) and checked against an RSA signature (+0x3c28,
 crypto block at 0xff0b0000). Next to "RK33" is SHA-256 of empty input,
 likely "no key hash burned in".
+
+## The SD card path (entry 5: init +0x32e0, read +0x33b0, header +0x344c)
+Controller 0 = SD card at 0xff370000, 1 = eMMC at 0xff390000 (same code).
+Delays (+0x5dc) are busy loops in microseconds, calibrated by the CPU MHz
+kept at SRAM 0xff0e0000.
+
+Controller setup (+0x2cd0):
+1. Pins to the SD function: GRF 0xff140018 = 0xff001100, 0xff14001c =
+   0xffff1111 (GPIO1 iomux), plus a PMUGRF write.
+2. Clock: CRU clksel16 = 0xc0ffc01f: the 24 MHz crystal / 32, and the
+   controller halves it: 375 kHz, inside the 100-400 kHz the spec wants.
+3. CTRL = 3 (reset controller and FIFO), CLKDIV 0, CLKENA 1, then the
+   "update clock" command (0x80202000), polled until accepted.
+4. TMOUT 0xffffff40, FIFOTH 0x307f0080, clear RINTSTS.
+
+Card start-up (+0x3304, +0x314c):
+1. CMD0 with 80 start-up clocks (CMD register 0x8100), 100 us wait.
+2. CMD8 arg 0x1aa. No answer: CMD55. No answer to that either: MMC path
+   (+0x1af8); answered: old SD v1 card (ACMD41 without HCS).
+3. ACMD41 (0x40ff8000) up to 2040 times until ready; bit 30 = SDHC, so
+   sector numbers instead of byte addresses (flag at 0xff0e0204).
+4. CMD2 (CID), CMD3 (RCA, kept at 0xff0e0200).
+5. Faster clock (+0x30bc): clksel16 = 0x000f: GPLL / 16, halved by the
+   controller. GPLL is 768 MHz (set at +0x42c4: con0 0x30c0, con1 0x42), so
+   the card runs at 24 MHz.
+6. CMD7 (select), CMD16 512, ACMD42 (DAT3 pull-up off), ACMD6 4-bit bus +
+   CTYPE = 1.
+No CMD9: the ROM never asks the card's size.
+
+Reads (+0x33b0, +0x2e08): CMD17 for the 512-byte header, CMD18 + CMD12 for
+each 2 KB chunk. Data comes through the FIFO, polled: no DMA, no interrupts.
