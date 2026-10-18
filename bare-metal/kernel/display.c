@@ -213,17 +213,32 @@ static void vo_clocks(void)
 // connection asked to go idle, every access to them faults. Linux's
 // pm-domains.c, PX30: power off = PMU+0x18 bit 13 (status +0x20 bit 13),
 // idle request = +0x64 bit 7 (granted: +0x6c bit 7, idle: bit 23).
-// These registers have no write mask: read, change, write.
+//
+// Linux treats these as plain registers (read, change, write), but on this
+// chip that write is ignored (measured: the bit stayed set). U-Boot clears
+// it with rk_clrreg(), a write-mask write: bit << 16, value 0. So: try the
+// plain way, and only if that didn't stick, the masked way. (Not the
+// other order: on a plain register, a masked write would clear the other
+// bits.)
 #define PMU 0xff000000UL
+
+static void pmu_clear(uint32_t reg, uint32_t bit)
+{
+	if (!(rd(PMU + reg) & bit))
+		return;
+	wr(PMU + reg, rd(PMU + reg) & ~bit);
+	if (rd(PMU + reg) & bit)
+		wr(PMU + reg, bit << 16);
+}
 
 static void vo_power_on(void)
 {
 	log.vo_pwr = rd(PMU + 0x20);
 	log.vo_idle = rd(PMU + 0x6c);
-	wr(PMU + 0x18, rd(PMU + 0x18) & ~(1U << 13));
+	pmu_clear(0x18, 1U << 13);
 	log.pwrdn_after = rd(PMU + 0x18);
 	int64_t on = wait_for(PMU + 0x20, 1U << 13, 0, 100000);
-	wr(PMU + 0x64, rd(PMU + 0x64) & ~(1U << 7));
+	pmu_clear(0x64, 1U << 7);
 	int64_t awake = wait_for(PMU + 0x6c, 1U << 7 | 1U << 23, 0, 10000);
 	log.vo_ok = on >= 0 && awake >= 0;
 	log.vo_power_failed = on < 0;
