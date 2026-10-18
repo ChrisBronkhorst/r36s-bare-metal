@@ -197,13 +197,15 @@ static void el2_init(void)
 // it if not.
 static uint64_t kernel_address(uint64_t list)
 {
-	if (list == 0 || list & 7 || list >= 0xf0000000)
+	// In RAM, or (where this loader puts it) the on-chip SRAM at 0xff0e0000
+	int in_sram = list >= 0xff0e0000 && list < 0xff0f0000;
+	if (list == 0 || list & 7 || (list >= 0xf0000000 && !in_sram))
 		return KERNEL_DEFAULT;
 	const volatile uint8_t *h = (const volatile uint8_t *)list;
 	if (h[0] != 3 || h[1] != 1)   // PARAM_BL31, version 1
 		return KERNEL_DEFAULT;
 	uint64_t ep = *(const volatile uint64_t *)(list + 8 + 3 * 8);
-	if (ep == 0 || ep & 7 || ep >= 0xf0000000)
+	if (ep == 0 || ep & 7 || (ep >= 0xf0000000 && !(ep >= 0xff0e0000 && ep < 0xff0f0000)))
 		return KERNEL_DEFAULT;
 	uint64_t pc = *(const volatile uint64_t *)(ep + 8);
 	if (pc < 0x100000 || pc >= 0xf0000000 || pc & 3)
