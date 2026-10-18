@@ -27,3 +27,8 @@ struct rail {
 };
 #define RK817_RAILS 13
 int rk817_rails(struct rail rails[RK817_RAILS]);
+
+// Switch output `rail` (0-12, as in rk817_rails) on or off. Its voltage
+// stays as it is.
+int rk817_rail_enable(uint32_t rail, int on);
+#define RAIL_VCC_LCD 11   // LDO8, the panel's power

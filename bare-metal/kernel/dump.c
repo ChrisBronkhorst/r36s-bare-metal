@@ -302,7 +302,4 @@ void dump_page(uint32_t page)
 		if (skipped)
 			kprintf(" +%u", skipped);
 	}
-	console_goto(0, 22);
-	console_color(YELLOW);
-	kputs("L/R: page   A: button test");
 }

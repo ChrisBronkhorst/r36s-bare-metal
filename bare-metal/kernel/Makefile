@@ -13,7 +13,7 @@ CFLAGS = -O2 -Wall -Wextra -ffreestanding -fno-builtin -nostdlib \
 	-mgeneral-regs-only -mstrict-align -fno-stack-protector \
 	-fno-asynchronous-unwind-tables
 
-OBJS = start.o vectors.o main.o screen.o console.o font.o gpio.o buttons.o exception.o mmu.o speed.o gic.o timer.o backlight.o i2c.o rk817.o dump.o scan.o
+OBJS = start.o vectors.o main.o screen.o console.o font.o gpio.o buttons.o exception.o mmu.o speed.o gic.o timer.o backlight.o i2c.o rk817.o dump.o scan.o display.o
 
 kernel.img: kernel.elf
 	$(LD) -T linker.ld --oformat binary -o $@ $(OBJS)
@@ -22,7 +22,7 @@ kernel.img: kernel.elf
 kernel.elf: $(OBJS) linker.ld
 	$(LD) -T linker.ld -o $@ $(OBJS)
 
-$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h
+$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

@@ -54,7 +54,7 @@ static const char *fault_name(uint32_t fsc)
 	return "other fault";
 }
 
-static void restart(void)
+void restart(void)
 {
 	// Ask ARM Trusted Firmware (one level up, EL3) to reset the board:
 	// PSCI SYSTEM_RESET, the same call Linux makes for `reboot`.

@@ -77,6 +77,16 @@ const char *rk817_charge_status(uint32_t status)
 	return names[status & 7];
 }
 
+int rk817_rail_enable(uint32_t rail, int on)
+{
+	// Each on/off register holds 4 outputs, in bits 0-3. Bits 4-7 are a
+	// write mask: only outputs whose mask bit is set change. So we can
+	// write one output without reading the register first.
+	uint32_t bit = rail % 4;
+	uint8_t value = (uint8_t)(1U << (bit + 4) | (on ? 1U << bit : 0));
+	return i2c_write(I2C0, RK817_ADDR, POWER_EN(rail / 4), &value, 1);
+}
+
 int rk817_rails(struct rail rails[RK817_RAILS])
 {
 	static const char *const outputs[RK817_RAILS] = {

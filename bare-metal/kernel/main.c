@@ -21,6 +21,7 @@
 #include "backlight.h"
 #include "buttons.h"
 #include "console.h"
+#include "display.h"
 #include "dump.h"
 #include "exception.h"
 #include "gic.h"
@@ -373,19 +374,40 @@ static void let_go(void)
 		wait();
 }
 
+// The display report. START takes the display over: our own code resets
+// and rebuilds the whole pipeline, and then the report shows what our code
+// set up, with a log page first. If the screen stays dark after that,
+// START again restarts the console.
 static void display_report(void)
 {
 	timer_start(1);
-	uint32_t page = 0;
+	uint32_t page = 0, pages = DUMP_PAGES;
+	int ours = 0;
 	for (;;) {
-		dump_page(page);
+		if (page == DUMP_PAGES)
+			display_takeover_log();
+		else
+			dump_page(page);
+		console_goto(0, 22);
+		console_color(YELLOW);
+		kputs(ours ? "L/R page  A buttons  START restart" : "L/R page  A buttons  START take over");
 		uint32_t down = next_press();
 		if (down & bit_of("A"))
 			break;
+		if (down & bit_of("START")) {
+			if (ours)
+				restart();
+			let_go();
+			display_takeover();
+			ours = 1;
+			pages = DUMP_PAGES + 1;
+			page = DUMP_PAGES;   // the log first
+			continue;
+		}
 		if (down & bit_of("R"))
-			page = (page + 1) % DUMP_PAGES;
+			page = (page + 1) % pages;
 		if (down & bit_of("L"))
-			page = (page + DUMP_PAGES - 1) % DUMP_PAGES;
+			page = (page + pages - 1) % pages;
 	}
 	let_go();
 }
