@@ -99,6 +99,8 @@ static struct {
 	uint32_t vop_reg, vop_got;               // the first VOP register that differs
 	uint32_t errors0, errors1;               // DSI error flags at the end
 	uint64_t dark_ms, total_ms;
+	uint32_t vo_pwr, vo_idle;   // the display power domain, as we found it
+	int vo_ok;                  // and whether it's on now
 	int done;
 } log;
 
@@ -179,6 +181,25 @@ static void clocks(void)
 	// Pixel clock dclk_vopb: CPLL / 20 = 29 MHz, not through the
 	// fractional divider
 	masked(CLKSEL(5), 3U << 14 | 1U << 11 | 0xff, 20 - 1);
+}
+
+// The chip can switch whole blocks off to save power ("power domains").
+// The VOP and the DSI host sit in the VO domain. Off, or with its bus
+// connection asked to go idle, every access to them faults. Linux's
+// pm-domains.c, PX30: power off = PMU+0x18 bit 13 (status +0x20 bit 13),
+// idle request = +0x64 bit 7 (granted: +0x6c bit 7, idle: bit 23).
+// These registers have no write mask: read, change, write.
+#define PMU 0xff000000UL
+
+static void vo_power_on(void)
+{
+	log.vo_pwr = rd(PMU + 0x20);
+	log.vo_idle = rd(PMU + 0x6c);
+	wr(PMU + 0x18, rd(PMU + 0x18) & ~(1U << 13));
+	int64_t on = wait_for(PMU + 0x20, 1U << 13, 0, 10000);
+	wr(PMU + 0x64, rd(PMU + 0x64) & ~(1U << 7));
+	int64_t awake = wait_for(PMU + 0x6c, 1U << 7 | 1U << 23, 0, 10000);
+	log.vo_ok = on >= 0 && awake >= 0;
 }
 
 // Every clock gate for the display open, as U-Boot left them: the VOP's
@@ -303,6 +324,39 @@ static void step_done(void)
 	delay_ms(450);
 }
 
+static void long_flashes(uint32_t n)
+{
+	delay_ms(1500);
+	for (uint32_t i = 0; i < n; i++) {
+		backlight_set(100);
+		delay_ms(600);
+		backlight_set(0);
+		delay_ms(600);
+	}
+}
+
+// After the 8 short flashes, in case there's no picture: two groups of
+// long flashes.
+//   first group:  1 = no faults, 2 = a fault in the VOP or DSI host,
+//                 3 = in the PHY, 4 = somewhere else
+//   second group: 1 = the display's power domain was on when we started,
+//                 2 = it was off or idle and we switched it on,
+//                 3 = it wouldn't come on
+static void report(void)
+{
+	if (!flashing)
+		return;
+	uint32_t where = 1;
+	if (fault_count) {
+		uint64_t a = fault_far & ~0xffffUL;
+		where = a == DSI || a == VOP ? 2 : a == PHY ? 3 : 4;
+	}
+	long_flashes(where);
+	int was_on = !(log.vo_pwr & 1U << 13) && !(log.vo_idle & (1U << 7 | 1U << 23));
+	long_flashes(!log.vo_ok ? 3 : was_on ? 1 : 2);
+	delay_ms(1500);
+}
+
 void display_start(int running)
 {
 	uint64_t start = now();
@@ -310,7 +364,8 @@ void display_start(int running)
 	flashing = !running;
 	survive_faults = !running;
 	backlight_set(0);
-	open_gates();
+	open_gates();    // (clocks running while the domain powers up)
+	vo_power_on();
 	shut_down(running);
 	step_done();     // 2: clock gates open, panel off
 	clocks();
@@ -329,6 +384,7 @@ void display_start(int running)
 	                 // they overflow the host's input (DSI error bit 0x80).
 	step_done();     // 8: VOP running
 	survive_faults = 0;
+	report();
 	delay_ms(120);
 	backlight_set(light ? light : 50);
 	log.dark_ms = (now() - start) / 24000;
@@ -399,6 +455,8 @@ void display_takeover_log(void)
 		kprintf("were %02x %02x %02x %02x\n", board_log.rails_before[0],
 			board_log.rails_before[1], board_log.rails_before[2], board_log.rails_before[3]);
 	}
+	row("Domain", log.vo_ok);
+	kprintf("VO domain %s (%x %x)\n", log.vo_ok ? "on" : "off!", log.vo_pwr, log.vo_idle);
 	if (fault_count) {
 		row("Faults", 0);
 		kprintf("%lu, first at %lx\n", fault_count, fault_far);
