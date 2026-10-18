@@ -135,8 +135,9 @@ void ram_page(void)
 
 	if (ours) {
 		label("Ours");
-		kprintf("PLL %u us, start %u us, %u %s\n", ours->dpll_lock_us, ours->init_us,
-			ours->training_tries, ours->training_tries == 1 ? "try" : "tries");
+		kprintf("PLL %u us, start %u us\n", ours->dpll_lock_us, ours->init_us);
+		label("Training");
+		kprintf("%u %s\n", ours->training_tries, ours->training_tries == 1 ? "try" : "tries");
 		label("Test");
 		kprintf("%u words ok in %u ms\n", ours->test_words, ours->test_us / 1000);
 		label("ROM left");

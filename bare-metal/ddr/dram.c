@@ -79,7 +79,7 @@ static int dpll_start(void)
 	   7U << (6 + 16) | 1 << 6 | 0x3fU << 16 | 1); // postdiv2 1, refdiv 1
 	uint64_t t = ticks();
 	while (!(rd(CRU + 0x24) & 1 << 10))            // locked?
-		if (ticks() - t > 24000)                   // 1 ms is plenty
+		if (ticks() - t > 24000 * 10)              // it took 628 us on this board
 			return -1;
 	early.dpll_lock_us = (ticks() - t) / 24;
 	wr(CRU + 0xa0, 3U << (4 + 16) | 1 << 4);   // DPLL_MODE: the PLL
