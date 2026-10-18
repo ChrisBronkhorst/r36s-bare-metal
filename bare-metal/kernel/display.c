@@ -307,12 +307,14 @@ static void dsi_phy_up(void)
 static void panel_up(void)
 {
 	// Power, then a clean reset pulse, as the panel driver does
+	// (Waits trimmed from the vendor's generous ones towards the panel
+	// controller's minimums: reset pulse 10 us, 5 ms after reset)
 	log.panel_power &= rk817_rail_enable(RAIL_VCC_LCD, 1) == 0;
-	delay_ms(20);
+	delay_ms(20);    // the power settles
 	gpio_output(PANEL_RESET_BANK, PANEL_RESET_PIN, 0);
-	delay_ms(150);
+	delay_ms(10);
 	gpio_output(PANEL_RESET_BANK, PANEL_RESET_PIN, 1);
-	delay_ms(50);
+	delay_ms(20);
 
 	// The start-up commands: mostly the panel maker's register settings
 	// (0xff 0x30 0x52 0x0n selects a page of them), then sleep out (0x11)
@@ -393,7 +395,10 @@ void display_start(int running)
 	step_done();     // 3: (kept, so the flash count still means the same)
 	delay_ms(1);
 	masked(SOFTRST(3), 1U << 4 | 1U << 5 | 1U << 13 | 1U << 14, 0);   // out of reset
-	delay_ms(200);   // let the panel's power drain away completely
+	// If the panel was powered (under U-Boot, or left on), let its power
+	// drain away completely. From a cold start it never was.
+	if (running || board_log.rails_before[RAIL_VCC_LCD / 4] & 1 << RAIL_VCC_LCD % 4)
+		delay_ms(200);
 	log.faults_before_reset = fault_count;
 	step_done();     // 4: out of reset
 	dsi_phy_up();
@@ -406,7 +411,7 @@ void display_start(int running)
 	                 // they overflow the host's input (DSI error bit 0x80).
 	step_done();     // 8: VOP running
 	survive_faults = 0;
-	delay_ms(120);
+	delay_ms(40);    // a couple of frames, so the first picture is complete
 	backlight_set(light ? light : 50);
 	log.dark_ms = (now() - start) / 24000;
 	log.total_ms = (now() - start) / 24000;

@@ -10,7 +10,8 @@ LD = ld.lld
 # -mstrict-align: no unaligned memory accesses (they fault on device memory,
 #   which is all memory before the MMU is on, and the hardware registers after)
 # make FLASHES=1: the backlight flashes once per display start-up step
-CFLAGS = $(if $(FLASHES),-DFLASHES) -O2 -Wall -Wextra -ffreestanding -fno-builtin -nostdlib \
+# make SPEEDTEST=1: also time the start-up work before the MMU is on
+CFLAGS = $(if $(FLASHES),-DFLASHES) $(if $(SPEEDTEST),-DSPEEDTEST) -O2 -Wall -Wextra -ffreestanding -fno-builtin -nostdlib \
 	-mgeneral-regs-only -mstrict-align -fno-stack-protector \
 	-fno-asynchronous-unwind-tables
 

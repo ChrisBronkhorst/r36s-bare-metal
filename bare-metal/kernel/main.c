@@ -152,6 +152,10 @@ static void speed_line(const char *name, uint64_t off, uint64_t on)
 {
 	uint64_t per_us = ticks_per_second / 1000000;
 	label(name);
+	if (!off) {   // not measured (see kmain)
+		kprintf("      -%7luus\n", on / per_us);
+		return;
+	}
 	kprintf("%7luus%7luus", off / per_us, on / per_us);
 	console_color(GREEN);
 	uint64_t x10 = on ? off * 10 / on : 0;   // how many times faster, 1 decimal
@@ -571,8 +575,11 @@ static void own_screen(void)
 	screen.format = FMT_RGB888;
 	screen.vop = 0xff460000UL;
 	screen.window = 1;
-	rect(0, 0, 640, 480, BG);
+}
 
+// ...then, with the MMU on (much faster screen writes), switch it all on
+static void own_screen_start(void)
+{
 	if (board_init() != 0)
 		return;   // no power chip: no backlight, no panel. Stay dark.
 #ifdef FLASHES
@@ -605,13 +612,18 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	if (!ticks_per_second)
 		ticks_per_second = 24000000;   // what the RK3326 uses
 
-	// the same work, before and after turning on the MMU and caches
+	// The same work, before and after turning on the MMU and caches. The
+	// "before" run costs a third of a second, so only with make SPEEDTEST=1.
+#ifdef SPEEDTEST
 	speed_test(&before, BG);
+#endif
 	// Our page tables are for EL2. ARM TF should start us there without
 	// U-Boot too, but if it doesn't, run without the MMU rather than crash.
 	if (current_el() == 2)
 		mmu_init((uintptr_t)screen.fb, screen.pitch * screen.height);
-	speed_test(&after, BG);
+	speed_test(&after, BG);   // this also clears the screen
+	if (!uboot)
+		own_screen_start();
 
 	interrupts_on();
 	show_info(device_tree, start_ticks);
