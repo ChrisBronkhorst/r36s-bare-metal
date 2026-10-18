@@ -81,13 +81,13 @@ void ram_page(void)
 	uint32_t row0 = ((((r2 >> 6 & 3) | (r3 >> 5 & 1) << 2) + 1) & 7) + 12;
 	uint32_t row1 = ((((r2 >> 4 & 3) | (r3 >> 4 & 1) << 2) + 1) & 7) + 12;
 	label("Summary");
-	kprintf("os_reg2 %08x  os_reg3 %08x\n", r2, r3);
+	kprintf("%08x %08x\n", r2, r3);
 	label("Type");
 	kprintf("%s (%u)\n", type_name(type), type);
 	label("Shape");
 	kprintf("%u rank%s, %u-bit bus, x%u chips\n", rank, rank > 1 ? "s" : "", 8 << bw, 8 << dbw);
 	label("");
-	kprintf("%u banks, %u columns, %u rows\n", 1 << bk, 1 << col, 1 << row0);
+	kprintf("%u banks, %u cols, %u rows\n", 1 << bk, 1 << col, 1 << row0);
 	uint64_t cs0 = 1ULL << (row0 + col + bk + bw);
 	uint64_t cs1 = rank > 1 ? 1ULL << (row1 + col + bk + bw) : 0;
 	if (r3 >> 30 & 1)   // row_3_4: only 3/4 of the top row bit is there
@@ -118,13 +118,13 @@ void ram_page(void)
 	label("Timings");
 	kprintf("%08x %08x %08x\n", rd(PCTL + 0x100), rd(PCTL + 0x104), rd(PCTL + 0x108));
 	label("Map");
-	kprintf("MSCH conf %08x size %08x\n", rd(MSCH + 0x8), rd(MSCH + 0xc));
+	kprintf("conf %08x size %08x\n", rd(MSCH + 0x8), rd(MSCH + 0xc));
 
 	// The PHY's training results: per byte lane, when to open the read gate
 	label("Gates");
 	for (int i = 0; i < 4; i++)
 		kprintf("%02x ", rd(PHY + 4 * (0xfb + i)) & 0xff);
-	kputs(" (0x20-0x80 is good)\n");
+	kputs("(good: 20-80)\n");
 	label("Drive");
 	kprintf("cmd %02x clk %02x dqs %02x odt %02x\n", rd(PHY + 4 * 0x11) & 0xff,
 		rd(PHY + 4 * 0x16) & 0xff, rd(PHY + 4 * 0x20) & 0xff, rd(PHY + 4 * 0x21) & 0xff);
@@ -138,7 +138,7 @@ void ram_page(void)
 
 struct region { char name[8]; uint32_t base, size; };
 static const struct region regions[] = {
-	{ "PCTL",    PCTL,             0x400 },
+	{ "PCTL",    PCTL,             0x500 },
 	{ "PHY",     PHY,              0x400 },
 	{ "MSCH",    MSCH,             0x120 },
 	{ "MSCHAGE", MSCH + 0x1000,    0x50 },
