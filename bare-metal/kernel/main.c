@@ -685,7 +685,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 				down = 0;
 			}
 		}
-		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y") | bit_of("START") | bit_of("SEL")))
+		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y") | bit_of("START") | bit_of("SEL") | bit_of("R1")))
 			break;
 		if (down & (bit_of("VOL+") | bit_of("VOL-"))) {
 			if (down & bit_of("VOL+"))
