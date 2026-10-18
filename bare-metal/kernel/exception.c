@@ -1,10 +1,12 @@
 // What happens when the CPU stops normal execution: vectors.S saves the
-// registers and calls exception(). A system call is handled and returns;
-// anything else is a crash, and we show everything we know about it.
+// registers and calls exception(). Interrupts and system calls are handled
+// and return; anything else is a crash, and we show everything we know.
 
 #include "buttons.h"
 #include "console.h"
 #include "exception.h"
+#include "gic.h"
+#include "timer.h"
 #include "sysreg.h"
 
 #define RED    0x801818
@@ -126,8 +128,23 @@ static void crash_screen(uint64_t slot, struct regs *r)
 	restart();
 }
 
+// An interrupt: ask the GIC which one, handle it, tell the GIC we're done.
+static void irq(void)
+{
+	uint32_t id = gic_ack();
+	if (id == GIC_SPURIOUS)   // it went away before we asked
+		return;
+	if (id == TIMER_IRQ)
+		timer_interrupt();
+	gic_done(id);
+}
+
 void exception(uint64_t slot, struct regs *r)
 {
+	if (slot == 5) {   // IRQ, from our own level (offset 0x280)
+		irq();
+		return;
+	}
 	uint64_t esr = EL_REG(esr);
 	// A system call from our own level, on a sync exception: count it and go
 	// back. ELR already points at the instruction after the `svc`.

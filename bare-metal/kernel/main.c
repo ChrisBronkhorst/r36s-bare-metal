@@ -1,4 +1,4 @@
-// Milestone 5: the MMU and caches.
+// Milestone 6: timer interrupts.
 //
 // First the kernel describes the machine it woke up on: which CPU, which
 // privilege level, the timer, the screen U-Boot handed us, and the device
@@ -7,17 +7,21 @@
 // START to cause an exception on purpose: four crash, the system call returns.
 //
 // Before all that, it times three small jobs with the caches off (as U-Boot
-// left them), turns on the MMU and caches, and times them again.
+// left them), turns on the MMU and caches, and times them again. Then it
+// switches on interrupts: the timer interrupts 60 times a second, and in
+// between, the CPU sleeps.
 
 #include <stdint.h>
 #include "buttons.h"
 #include "console.h"
 #include "exception.h"
+#include "gic.h"
 #include "gpio.h"
 #include "mmu.h"
 #include "screen.h"
 #include "speed.h"
 #include "sysreg.h"
+#include "timer.h"
 
 #define BG     0x10202c
 #define WHITE  0xf0f0f0
@@ -98,6 +102,28 @@ static const char *cpu_name(uint64_t midr)
 
 static uint64_t ticks_per_second;
 static struct speed before, after;
+static int irqs_work;   // did the timer interrupt actually arrive?
+
+// Sleep until an interrupt (Wait For Interrupt), if they're working.
+static void wait(void)
+{
+	if (irqs_work)
+		__asm__ volatile("wfi");
+}
+
+static void interrupts_on(void)
+{
+	if (current_el() == 2) {
+		// HCR_EL2.IMO: IRQs are for EL2 (us). Without it they'd be meant for
+		// EL1, and the CPU never interrupts a higher level for a lower one.
+		uint64_t hcr = READ_SYSREG(hcr_el2);
+		__asm__ volatile("msr hcr_el2, %0\nisb" : : "r"(hcr | 1UL << 4));
+	}
+	gic_init();
+	gic_enable(TIMER_IRQ, 0x80);
+	timer_start(60);
+	__asm__ volatile("msr daifclr, #2" ::: "memory");   // unmask IRQs: I = 0
+}
 
 static uint64_t now(void)
 {
@@ -225,6 +251,7 @@ static void button_test(void)
 
 	uint32_t shown = 0;
 	for (;;) {
+		wait();   // look again after the next timer tick: 60 times a second
 		uint32_t pressed = buttons_pressed();
 		if (pressed == shown)
 			continue;
@@ -282,20 +309,63 @@ void kmain(uintptr_t device_tree)
 	mmu_init((uintptr_t)screen.fb, screen.pitch * screen.height);
 	speed_test(&after, BG);
 
+	interrupts_on();
 	show_info(device_tree, start_ticks);
 	buttons_init();
 
-	// a clock that keeps ticking until a button is pressed
 	kputc('\n');
 	console_color(YELLOW);
 	kputs("Press any button to test the buttons\n");
+	uint32_t row = console_row();
 	label("Running");
-	console_color(GREEN);
-	uint32_t clock_row = console_row();
+	console_goto(0, row + 1);
+	label("IRQs");
+	console_goto(0, row + 2);
+	label("Late");
+	console_goto(0, row + 3);
+	label("Awake");
+
+	// Did the timer interrupt arrive? Give it a fifth of a second.
+	uint64_t t = now();
+	while (!timer_ticks && now() - t < ticks_per_second / 5)
+		;
+	irqs_work = timer_ticks != 0;
+	if (!irqs_work) {   // say why, then fall back to polling
+		console_goto(8, row + 1);
+		console_color(YELLOW);
+		kprintf("none! pending %d, timer %lx", gic_pending(TIMER_IRQ),
+			READ_SYSREG(cntp_ctl_el0));
+	}
+
+	// A clock driven by the timer interrupt. Between ticks the CPU sleeps
+	// (wfi); we add up how long, to see how much of the time it's awake.
+	uint64_t asleep = 0, since = now(), shown = ~0UL;
 	while (!buttons_pressed()) {
-		uint64_t tenths = (now() - start_ticks) * 10 / ticks_per_second;
-		console_goto(8, clock_row);
+		uint64_t before_wfi = now();
+		wait();
+		asleep += now() - before_wfi;
+		uint64_t ticks = timer_ticks;
+		if (ticks == shown)
+			continue;
+		shown = ticks;
+
+		uint64_t tenths = irqs_work ? ticks / 6 : (now() - start_ticks) * 10 / ticks_per_second;
+		console_color(GREEN);
+		console_goto(8, row);
 		kprintf("%lu.%lu s   ", tenths / 10, tenths % 10);
+		if (!irqs_work)
+			continue;
+		console_color(WHITE);
+		console_goto(8, row + 1);
+		kprintf("%lu timer interrupts", ticks);
+		// counter ticks to nanoseconds: x 1000 / 24
+		console_goto(8, row + 2);
+		kprintf("min %lu avg %lu max %lu ns ", timer_late_min * 125 / 3,
+			timer_late_sum * 125 / 3 / ticks, timer_late_max * 125 / 3);
+		uint64_t total = now() - since;
+		uint64_t awake = (total - asleep) * 1000 / total;   // tenths of a percent
+		console_goto(8, row + 3);
+		kprintf("%lu.%lu%% of the time   ", awake / 10, awake % 10);
 	}
 	while (buttons_pressed())   // wait for it to be let go
 		;
