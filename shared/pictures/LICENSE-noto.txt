@@ -1,0 +1,4 @@
+Copyright 2013 Google LLC
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+Pictures: Noto Emoji by Google, Apache License 2.0 (https://github.com/googlefonts/noto-emoji)

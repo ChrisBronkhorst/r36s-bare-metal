@@ -1,0 +1,321 @@
+// Milestone 5: the MMU and caches.
+//
+// First the kernel describes the machine it woke up on: which CPU, which
+// privilege level, the timer, the screen U-Boot handed us, and the device
+// tree, with a live clock. Press any button and it switches to a button test
+// that lights up each button as you press it. Hold FN and press A, B, X, Y or
+// START to cause an exception on purpose: four crash, the system call returns.
+//
+// Before all that, it times three small jobs with the caches off (as U-Boot
+// left them), turns on the MMU and caches, and times them again.
+
+#include <stdint.h>
+#include "buttons.h"
+#include "console.h"
+#include "exception.h"
+#include "gpio.h"
+#include "mmu.h"
+#include "screen.h"
+#include "speed.h"
+#include "sysreg.h"
+
+#define BG     0x10202c
+#define WHITE  0xf0f0f0
+#define GREY   0x8090a0
+#define YELLOW 0xf0d020
+#define GREEN  0x60d070
+#define KEY    0x304050   // a button that isn't pressed
+
+extern char _start[], _end[];
+
+static void label(const char *name)
+{
+	console_color(GREY);
+	uint32_t n = 0;
+	for (; name[n]; n++)
+		kputc(name[n]);
+	for (; n < 8; n++)   // pad to 8 columns so the values line up
+		kputc(' ');
+	console_color(WHITE);
+}
+
+// ---- the device tree --------------------------------------------------------
+// U-Boot passed us a "flattened device tree": a description of all the
+// hardware, in a simple binary format, with every number stored big-endian.
+// We walk it to find the board's name, the "model" property of the root node.
+
+static uint32_t be32(const uint8_t *p)
+{
+	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+static int same(const char *a, const char *b)
+{
+	while (*a && *a == *b)
+		a++, b++;
+	return *a == *b;
+}
+
+static const char *dt_model(const uint8_t *dt)
+{
+	const uint8_t *p = dt + be32(dt + 8);                 // the structure block
+	const char *strings = (const char *)dt + be32(dt + 12); // property names
+	int depth = 0;
+	for (;;) {
+		uint32_t token = be32(p);
+		p += 4;
+		if (token == 1) {            // begin node: name follows, padded to 4 bytes
+			depth++;
+			while (*p++)
+				;
+			p = (const uint8_t *)(((uintptr_t)p + 3) & ~3UL);
+		} else if (token == 2) {     // end node
+			depth--;
+		} else if (token == 3) {     // property: length, name offset, value
+			uint32_t len = be32(p), name = be32(p + 4);
+			if (depth == 1 && same(strings + name, "model"))
+				return (const char *)p + 8;
+			p += 8 + ((len + 3) & ~3U);
+		} else if (token != 4) {     // 4 = nothing; 9 = end; anything else = broken
+			return 0;
+		}
+	}
+}
+
+// ---- the CPU ----------------------------------------------------------------
+
+static const char *cpu_name(uint64_t midr)
+{
+	if ((midr >> 24) != 0x41)
+		return "not ARM-designed";
+	switch ((midr >> 4) & 0xfff) {
+	case 0xd03: return "Cortex-A53";
+	case 0xd04: return "Cortex-A35";
+	case 0xd05: return "Cortex-A55";
+	}
+	return "ARM core";
+}
+
+static uint64_t ticks_per_second;
+static struct speed before, after;
+
+static uint64_t now(void)
+{
+	return READ_SYSREG(cntpct_el0);
+}
+
+static void speed_line(const char *name, uint64_t off, uint64_t on)
+{
+	uint64_t per_us = ticks_per_second / 1000000;
+	label(name);
+	kprintf("%7luus%7luus", off / per_us, on / per_us);
+	console_color(GREEN);
+	uint64_t x10 = on ? off * 10 / on : 0;   // how many times faster, 1 decimal
+	kprintf("%5lu.%lux\n", x10 / 10, x10 % 10);
+}
+
+static void show_info(uintptr_t device_tree, uint64_t start_ticks)
+{
+	uint64_t midr = READ_SYSREG(midr_el1);
+
+	console_init(WHITE, BG);
+	console_color(YELLOW);
+	kputs("Hello from our own kernel!\n");
+
+	label("CPU");
+	kprintf("%s r%dp%d\n", cpu_name(midr), (int)(midr >> 20) & 0xf, (int)midr & 0xf);
+	label("Level");
+	kprintf("EL%u\n", current_el());
+	// DAIF: 1 = masked (blocked). D debug, A SError, I IRQ, F FIQ
+	uint64_t daif = READ_SYSREG(daif);
+	label("Masks");
+	kprintf("D%lu A%lu I%lu F%lu (1 = blocked)\n", daif >> 9 & 1, daif >> 8 & 1, daif >> 7 & 1, daif >> 6 & 1);
+	label("Vectors");
+	kprintf("%p\n", current_el() == 2 ? READ_SYSREG(vbar_el2) : READ_SYSREG(vbar_el1));
+	label("Timer");
+	kprintf("%lu ticks a second\n", ticks_per_second);
+	label("Booted");
+	kprintf("%lu ms after power-on\n", start_ticks * 1000 / ticks_per_second);
+	label("Kernel");
+	kprintf("%p, %lu bytes\n", _start, (uint64_t)(_end - _start));
+	label("Screen");
+	kprintf("%ux%u %s\n", screen.width, screen.height, format_name(screen.format));
+	label("");
+	kprintf("at %p, pitch %u\n", screen.fb, screen.pitch);
+
+	const uint8_t *dt = (const uint8_t *)device_tree;
+	label("Tree");
+	if (dt && be32(dt) == 0xd00dfeed) {
+		kprintf("%p, %u bytes\n", dt, be32(dt + 4));
+		const char *model = dt_model(dt);
+		console_color(GREY);
+		kputs("Model ");   // 2 short of the usual 8 columns, so the name fits
+		console_color(WHITE);
+		kputs(model ? model : "(none)");
+		kputc('\n');
+	} else {
+		kprintf("no device tree at %p\n", dt);
+	}
+
+	uint64_t sctlr = current_el() == 2 ? READ_SYSREG(sctlr_el2) : READ_SYSREG(sctlr_el1);
+	label("Memory");
+	kprintf("MMU %s, caches %s\n", sctlr & 1 ? "on" : "off", sctlr & 4 ? "on" : "off");
+	label("Speed");
+	console_color(GREY);
+	kputs("      off       on  faster\n");
+	speed_line("Code", before.code, after.code);
+	speed_line("RAM", before.ram, after.ram);
+	speed_line("Screen", before.screen, after.screen);
+}
+
+// ---- the button test --------------------------------------------------------
+
+static uint32_t length(const char *s)
+{
+	uint32_t n = 0;
+	while (s[n])
+		n++;
+	return n;
+}
+
+static void draw_button(const struct button *b, int down)
+{
+	uint32_t fill = down ? YELLOW : KEY;
+	uint32_t ink = down ? BG : WHITE;
+	rect(b->x, b->y, b->w, b->h, fill);
+	text_at(b->x + (b->w - length(b->name) * CELL_W) / 2, b->y + (b->h - 16) / 2,
+		b->name, ink, fill);
+}
+
+static uint32_t bit_of(const char *name)
+{
+	for (uint32_t i = 0; i < button_count; i++)
+		if (same(buttons[i].name, name))
+			return 1U << i;
+	return 0;
+}
+
+// A 4-byte read from an odd address in device memory (GPIO1's registers).
+// Normal memory allows that now that the MMU is on; device memory never does:
+// an alignment fault.
+static void misaligned_read(void)
+{
+	uint32_t value;
+	uintptr_t odd = 0xff250000UL + 0x50 + 1;
+	__asm__ volatile("ldr %w0, [%1]" : "=r"(value) : "r"(odd));
+}
+
+// 0x40000000 is past the end of RAM, and our page tables say nothing is
+// there: a translation fault.
+static void unmapped_read(void)
+{
+	uint32_t value;
+	__asm__ volatile("ldr %w0, [%1]" : "=r"(value) : "r"(0x40000000UL));
+}
+
+static void button_test(void)
+{
+	console_init(WHITE, BG);
+	console_color(YELLOW);
+	kputs("Press the buttons\n");
+	console_color(GREY);
+	kputs("Hold FN + A B X Y START: tests");
+	for (uint32_t i = 0; i < button_count; i++)
+		draw_button(&buttons[i], 0);
+
+	uint32_t shown = 0;
+	for (;;) {
+		uint32_t pressed = buttons_pressed();
+		if (pressed == shown)
+			continue;
+		for (uint32_t i = 0; i < button_count; i++) {
+			uint32_t bit = 1U << i;
+			if ((pressed ^ shown) & bit)
+				draw_button(&buttons[i], pressed & bit);
+			if (pressed & bit & ~shown) {   // just went down: say what it is
+				const struct button *b = &buttons[i];
+				console_goto(0, 20);
+				console_color(GREY);
+				kprintf("%s = GPIO%u pin %u            ", b->dt_label, b->bank, b->pin);
+			}
+		}
+		// the raw input registers: watch a bit drop to 0 as you press
+		console_goto(0, 21);
+		console_color(GREY);
+		kprintf("1:%08x 2:%08x 3:%08x", gpio_read(1), gpio_read(2), gpio_read(3));
+		uint32_t fn = bit_of("FN");
+		if (pressed & fn) {
+			uint32_t now_down = pressed & ~shown;
+			if (now_down & bit_of("A"))
+				__asm__ volatile("brk #1");          // breakpoint
+			if (now_down & bit_of("B"))
+				__asm__ volatile("udf #0");          // permanently undefined
+			if (now_down & bit_of("X"))
+				misaligned_read();
+			if (now_down & bit_of("START"))
+				unmapped_read();
+			if (now_down & bit_of("Y")) {
+				__asm__ volatile("svc #42" ::: "memory");   // comes back
+				console_goto(0, 20);
+				console_color(GREEN);
+				kprintf("svc #%u went and came back (%u)    ", last_syscall, syscall_count);
+			}
+		}
+		shown = pressed;
+	}
+}
+
+void kmain(uintptr_t device_tree)
+{
+	vectors_install();   // from here on, crashes come to us, not U-Boot
+
+	if (!screen_init())
+		return;  // no screen to draw on; start.S parks the CPU
+
+	uint64_t start_ticks = now();
+	ticks_per_second = READ_SYSREG(cntfrq_el0);
+	if (!ticks_per_second)
+		ticks_per_second = 24000000;   // what the RK3326 uses
+
+	// the same work, before and after turning on the MMU and caches
+	speed_test(&before, BG);
+	mmu_init((uintptr_t)screen.fb, screen.pitch * screen.height);
+	speed_test(&after, BG);
+
+	show_info(device_tree, start_ticks);
+	buttons_init();
+
+	// a clock that keeps ticking until a button is pressed
+	kputc('\n');
+	console_color(YELLOW);
+	kputs("Press any button to test the buttons\n");
+	label("Running");
+	console_color(GREEN);
+	uint32_t clock_row = console_row();
+	while (!buttons_pressed()) {
+		uint64_t tenths = (now() - start_ticks) * 10 / ticks_per_second;
+		console_goto(8, clock_row);
+		kprintf("%lu.%lu s   ", tenths / 10, tenths % 10);
+	}
+	while (buttons_pressed())   // wait for it to be let go
+		;
+	button_test();
+}
+
+// The compiler may turn loops into calls to these, and there's no C library.
+void *memset(void *dst, int c, unsigned long n)
+{
+	volatile uint8_t *d = dst;
+	while (n--)
+		*d++ = (uint8_t)c;
+	return dst;
+}
+
+void *memcpy(void *dst, const void *src, unsigned long n)
+{
+	volatile uint8_t *d = dst;
+	const uint8_t *s = src;
+	while (n--)
+		*d++ = *s++;
+	return dst;
+}

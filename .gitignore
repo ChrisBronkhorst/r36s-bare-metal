@@ -1,0 +1,23 @@
+# The stock SD card image (1.9 GB): keep it, but not in git
+backup/
+
+# Built game packages (made by deploy.sh / run.sh)
+build/
+
+# The LÖVE app used to run games on the Mac: downloaded, not ours
+tools/love.app/
+
+# Kernel build output (make rebuilds these)
+bare-metal/kernel/*.o
+bare-metal/kernel/kernel.elf
+bare-metal/kernel/kernel.img
+
+# Ghidra's project database: big and changes on every open. The blob and our
+# labelling script are tracked; the project can be rebuilt from them.
+bare-metal/ddr-blob/ghidra/
+
+# A clone of Rockchip's U-Boot, for reading only (it's its own git repo)
+bare-metal/ddr-blob/u-boot-src/
+
+.DS_Store
+._*

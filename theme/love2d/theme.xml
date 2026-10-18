@@ -1,0 +1,25 @@
+<theme>
+<formatVersion>7</formatVersion>
+<include>./../theme.xml</include>
+
+<view name="basic, detailed, video, grid">
+  <text name="nameLabel" extra="true">
+    <text>Our Games</text>
+  </text>
+</view>
+
+<view name="system">
+  <text name="sys_line1" extra="true">
+    <text>Our Games</text>
+  </text>
+  <text name="sys_line2" extra="true">
+    <text>Made at Home</text>
+  </text>
+  <text name="shortdescription" extra="true">
+   <text>2026  ·  Toddler Games</text>
+  </text>
+  <text name="longdescription" extra="true">
+   <text>Simple button games we made together. Every button does something fun. Hold Start and Select for 3 seconds to exit.</text>
+  </text>
+ </view>
+</theme>

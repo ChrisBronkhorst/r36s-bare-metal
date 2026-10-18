@@ -1,0 +1,28 @@
+# letter | how the sound is written for the recorder | word | picture (Noto emoji code)
+# Order here is the order the games teach them. Reorder lines to change it.
+a|a (as in apple)|apple|1f34e
+b|b (buh)|ball|1f3c0
+c|c (kuh)|cat|1f408
+d|d (duh)|dog|1f415
+e|e (as in egg)|egg|1f95a
+f|f (fff)|fish|1f41f
+g|g (guh)|goat|1f410
+h|h (huh)|house|1f3e0
+i|i (as in insect)|insect|1f41b
+j|j (juh)|juice|1f9c3
+k|k (kuh)|kite|1fa81
+l|l (lll)|lion|1f981
+m|m (mmm)|monkey|1f412
+n|n (nnn)|nose|1f443
+o|o (as in octopus)|octopus|1f419
+p|p (puh)|pig|1f416
+q|q (kwuh)|queen|1f478
+r|r (rrr)|rabbit|1f407
+s|s (sss)|sun|2600
+t|t (tuh)|tree|1f333
+u|u (as in umbrella)|umbrella|2602
+v|v (vvv)|van|1f690
+w|w (wuh)|whale|1f40b
+x|x (ks, as in fox)|fox|1f98a
+y|y (yuh)|yo-yo|1fa80
+z|z (zzz)|zebra|1f993

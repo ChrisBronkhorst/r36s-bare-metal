@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<gameList>
+	<game>
+		<path>./counting-beads.love</path>
+		<name>1. Counting Beads</name>
+		<desc>Every press adds a bead and counts it, from 1 to 9. The bar takes its Montessori bead-stair color.</desc>
+		<image>./images/counting-beads.png</image>
+	</game>
+	<game>
+		<path>./letter-sounds.love</path>
+		<name>2. Letter Sounds</name>
+		<desc>One letter at a time. Every press says its sound and a word: "mmm ... monkey".</desc>
+		<image>./images/letter-sounds.png</image>
+	</game>
+	<game>
+		<path>./number-pop.love</path>
+		<name>3. Number Pop</name>
+		<desc>Count from 0 to 9, one number at a time. Press any button to pop it, hear its name, and count the dots.</desc>
+		<image>./images/number-pop.png</image>
+	</game>
+	<game>
+		<path>./four-corners.love</path>
+		<name>4. Four Corners</name>
+		<desc>Four cards laid out like the buttons. Press a button to hear the card in that spot. Start switches letters and numbers.</desc>
+		<image>./images/four-corners.png</image>
+	</game>
+	<game>
+		<path>./where-is.love</path>
+		<name>5. Where Is...?</name>
+		<desc>"Where is mmm?" Pick left or right. Start switches letters and numbers.</desc>
+		<image>./images/where-is.png</image>
+	</game>
+	<game>
+		<path>./what-is-this.love</path>
+		<name>6. What Is This?</name>
+		<desc>Play together: a card shows, he names it, then press to hear the answer. Start switches letters and numbers.</desc>
+		<image>./images/what-is-this.png</image>
+	</game>
+	<game>
+		<path>./balloon-pop.love</path>
+		<name>Balloon Pop</name>
+		<desc>Balloons float up. Press any button to pop one and hear its color.</desc>
+		<image>./images/balloon-pop.png</image>
+	</game>
+	<game>
+		<path>./button-party.love</path>
+		<name>Button Party</name>
+		<desc>Every button makes a burst of color and a happy note.</desc>
+		<image>./images/button-party.png</image>
+	</game>
+	<game>
+		<path>./croc.love</path>
+		<name>Croc</name>
+		<desc>Play with Croc! A chomps, B jumps, X waves hi, Y dances, the D-pad looks around, the shoulder buttons tickle, and Start says rawr.</desc>
+		<image>./images/croc.png</image>
+	</game>
+	<game>
+		<path>./hungry-croc.love</path>
+		<name>Hungry Croc</name>
+		<desc>Feed Croc letters! Press any button and he chomps the card, then says its sound and word. Start switches to numbers.</desc>
+		<image>./images/hungry-croc.png</image>
+	</game>
+</gameList>
