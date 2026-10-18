@@ -1,7 +1,7 @@
 # The display registers as U-Boot left them (2026-10-19), copied from photos
 # of the kernel's display report (X on the info page). Each page's CRC-32
 # matches the one on screen, so the copy is exact. What our own display
-# setup has to reproduce. Still missing: PHY registers 0xe0-0xff (LVDS part).
+# setup has to reproduce. Complete: every page checks out.
 # Run it to re-check: python3 uboot-display-dump.py
 import zlib, struct
 def crc(pairs): return zlib.crc32(b''.join(struct.pack('<II',a,v) for a,v in pairs))
@@ -32,3 +32,11 @@ for base in (0x40,0x60,0x80,0xa0,0xc0):
         phy.append((a,v))
 for name,p,want in (("VOP",vop,0xe81cbb3d),("DSI",dsi,0x4c3c2a3d),("misc",misc,0x3bc89e69),("PHY first 114",phy[:114],0x3c7e48d2)):
     print(name, len(p), "ok" if crc(p)==want else "MISMATCH %08x"%crc(p))
+
+# Second PHY page (registers 0x80-0xff), photographed separately: lanes 1-3
+# as above, plus the LVDS part (0xe0-0xff).
+lvds = [(int(a, 16), int(v, 16)) for a, v in (x.split('=') for x in
+	"e0=45 e1=12 e2=20 e3=01 e4=aa e5=dd e7=06 e8=38 e9=ff ea=fd eb=05".split())]
+phy_hi = [p for p in phy if p[0] >= 0x80] + lvds
+print("PHY 80-ff", len(phy_hi), "ok" if crc(phy_hi) == 0x8767f256 else "MISMATCH %08x" % crc(phy_hi))
+phy_all = phy + lvds   # every non-zero PHY register
