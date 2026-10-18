@@ -563,9 +563,10 @@ static void button_test(void)
 	}
 }
 
-// Without U-Boot, nothing has set up the screen: we make our own.
-// Before the picture is there, the backlight is our only signal: one
-// flash per step (see display_start), steady full light = crashed.
+// Without U-Boot, nothing has set up the screen: we make our own. First
+// just where it lives, so the MMU can map it...
+// (Before the picture is there, the backlight is our only signal: steady
+// full light = crashed; with make FLASHES=1, also one flash per step.)
 static void own_screen(void)
 {
 	screen.fb = (volatile uint8_t *)0x3de00000UL;   // where U-Boot put it
