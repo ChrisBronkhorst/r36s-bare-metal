@@ -10,7 +10,11 @@
 #define USB_VOL_H    0x7e   // charging port voltage
 #define VCALIB0_H    0x93   // factory calibration points for the voltage ADC
 #define VCALIB1_H    0x95
+#define ADC_CONFIG0  0x50   // which measurements are switched on
+#define USB_VOL_ADC_EN (1U << 4)
 #define CHRG_STS     0xeb
+#define SYS_STS      0xf0
+#define PLUG_IN      (1U << 6)
 #define POWER_EN(i)  (0xb1 + (i))   // on/off: 4 outputs per register, bits 0-3
 #define BUCK_VSEL(i) (0xbb + 3 * (i))
 #define LDO_VSEL(i)  (0xcc + 2 * (i))
@@ -36,10 +40,11 @@ int rk817_id(uint32_t *id)
 int rk817_battery(struct battery *b)
 {
 	uint32_t vcalib0, vcalib1, vol, cur, usb;
-	uint8_t sts;
+	uint8_t sts, sys, adc;
 	int err = read16(VCALIB0_H, &vcalib0) | read16(VCALIB1_H, &vcalib1) |
 		read16(BAT_VOL_H, &vol) | read16(BAT_CUR_H, &cur) |
-		read16(USB_VOL_H, &usb) | read(CHRG_STS, &sts, 1);
+		read16(USB_VOL_H, &usb) | read(CHRG_STS, &sts, 1) |
+		read(SYS_STS, &sys, 1) | read(ADC_CONFIG0, &adc, 1);
 	if (err)
 		return err;
 
@@ -55,8 +60,11 @@ int rk817_battery(struct battery *b)
 	// line, 172 microamps per count.
 	b->ma = (int16_t)cur * 172 / 1000;
 
-	// The charging port, through a 46:60 divider
-	b->charger_mv = usb > 1 ? (k * (int32_t)usb / 1000 + c) * 60 / 46 : 0;
+	// Plugged in: a status bit. The port's voltage is only measured if that
+	// ADC channel is on, and U-Boot may leave it off.
+	b->plugged_in = sys & PLUG_IN ? 1 : 0;
+	b->charger_mv = adc & USB_VOL_ADC_EN && usb > 1 ?
+		(k * (int32_t)usb / 1000 + c) * 60 / 46 : 0;   // through a 46:60 divider
 	b->status = sts >> 4 & 7;
 	return 0;
 }

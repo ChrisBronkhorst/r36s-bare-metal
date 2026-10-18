@@ -12,7 +12,8 @@ int rk817_id(uint32_t *id);   // 0 if it answered; the ID should be 0x817x
 struct battery {
 	uint32_t mv;           // battery voltage
 	int32_t ma;            // current: + into the battery (charging), - out
-	uint32_t charger_mv;   // voltage at the charging port, 0 if nothing
+	int plugged_in;        // is a charger connected?
+	uint32_t charger_mv;   // voltage at the charging port, 0 if not measured
 	uint32_t status;       // 0-7, see rk817_charge_status()
 };
 int rk817_battery(struct battery *b);

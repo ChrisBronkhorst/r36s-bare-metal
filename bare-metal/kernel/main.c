@@ -295,9 +295,12 @@ static void draw_power(void)
 		console_clear_eol();
 		kputc('\n');
 		label("Charger");
-		if (b.charger_mv) {
-			millivolts(b.charger_mv);
-			kprintf(", %s", rk817_charge_status(b.status));
+		if (b.plugged_in) {
+			if (b.charger_mv) {
+				millivolts(b.charger_mv);
+				kputs(", ");
+			}
+			kputs(rk817_charge_status(b.status));
 		} else {
 			kputs("not plugged in");
 		}
@@ -327,18 +330,26 @@ static void power_page(void)
 	console_color(YELLOW);
 	kputs("The power chip\n");
 	console_goto(0, 22);
-	kputs("A: button test");
+	kputs("A: button test   VOL+/-: light");
 	timer_start(1);
+	uint32_t light = backlight_get(), held = buttons_pressed();
 	for (;;) {
 		draw_power();
 		uint64_t ticks = timer_ticks;
 		while (timer_ticks == ticks) {   // sleep until the next second
 			wait();
-			if (buttons_pressed() & bit_of("A")) {
+			uint32_t pressed = buttons_pressed(), down = pressed & ~held;
+			held = pressed;
+			if (down & bit_of("A")) {
 				while (buttons_pressed())
 					wait();
 				return;
 			}
+			// change the brightness, and watch the current follow
+			if (down & bit_of("VOL+"))
+				backlight_set(light = light >= 90 ? 100 : light + 10);
+			if (down & bit_of("VOL-"))
+				backlight_set(light = light <= 20 ? 10 : light - 10);
 		}
 	}
 }
