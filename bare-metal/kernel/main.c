@@ -547,7 +547,10 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 
 	// the same work, before and after turning on the MMU and caches
 	speed_test(&before, BG);
-	mmu_init((uintptr_t)screen.fb, screen.pitch * screen.height);
+	// Our page tables are for EL2. ARM TF should start us there without
+	// U-Boot too, but if it doesn't, run without the MMU rather than crash.
+	if (current_el() == 2)
+		mmu_init((uintptr_t)screen.fb, screen.pitch * screen.height);
 	speed_test(&after, BG);
 
 	interrupts_on();
