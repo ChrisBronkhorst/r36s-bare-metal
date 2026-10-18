@@ -102,6 +102,8 @@ static struct {
 	uint32_t vo_pwr, vo_idle;   // the display power domain, as we found it
 	int vo_ok;                  // and whether it's on now
 	int vo_power_failed;        // (if not: 1 = no power, 0 = bus stayed idle)
+	uint32_t pwrdn_after;       // PMU_PWRDN_CON right after our write
+	uint64_t faults_before_reset;   // faults up to step 4
 	int done;
 } log;
 
@@ -156,9 +158,11 @@ static void shut_down(int running)
 	gpio_output(PANEL_RESET_BANK, PANEL_RESET_PIN, 0);
 	log.panel_power = rk817_rail_enable(RAIL_VCC_LCD, 0) == 0;
 
-	// DSI host and PHY off
-	wr(DSI + DSI_PWR_UP, 0);
-	wr(DSI + DSI_PHY_RSTZ, 0);
+	// DSI host and PHY off (from cold they're off anyway)
+	if (running) {
+		wr(DSI + DSI_PWR_UP, 0);
+		wr(DSI + DSI_PHY_RSTZ, 0);
+	}
 
 	// Hold the VOP (registers + pixel side), DSI host and PHY in reset.
 	// Reset numbers from px30-cru.h: VOPB_H 52, VOPB 53, MIPIDSI_HOST_P 61,
@@ -217,7 +221,8 @@ static void vo_power_on(void)
 	log.vo_pwr = rd(PMU + 0x20);
 	log.vo_idle = rd(PMU + 0x6c);
 	wr(PMU + 0x18, rd(PMU + 0x18) & ~(1U << 13));
-	int64_t on = wait_for(PMU + 0x20, 1U << 13, 0, 10000);
+	log.pwrdn_after = rd(PMU + 0x18);
+	int64_t on = wait_for(PMU + 0x20, 1U << 13, 0, 100000);
 	wr(PMU + 0x64, rd(PMU + 0x64) & ~(1U << 7));
 	int64_t awake = wait_for(PMU + 0x6c, 1U << 7 | 1U << 23, 0, 10000);
 	log.vo_ok = on >= 0 && awake >= 0;
@@ -359,24 +364,19 @@ static void long_flashes(uint32_t n)
 
 // After the 8 short flashes, in case there's no picture: two groups of
 // long flashes.
-//   first group:  1 = no faults, 2 = a fault in the VOP or DSI host,
-//                 3 = in the PHY, 4 = somewhere else
-//   second group: 1 = the display's power domain was on when we started,
-//                 2 = it was off or idle and we switched it on,
-//                 3 = it wouldn't power up, 4 = powered, but its bus
-//                 connection stayed idle
+//   first group:  did our write to the power switch stick? (PMU+0x18
+//                 bit 13 read back) 1 = yes, 2 = no, still "off"
+//   second group: does the domain say it's on? (PMU+0x20 bit 13, read
+//                 now) 1 = on, 2 = off
+//   third group:  faults once the display was out of reset (steps 5-8)?
+//                 1 = none, 2 = some
 static void report(void)
 {
 	if (!flashing)
 		return;
-	uint32_t where = 1;
-	if (fault_count) {
-		uint64_t a = fault_far & ~0xffffUL;
-		where = a == DSI || a == VOP ? 2 : a == PHY ? 3 : 4;
-	}
-	long_flashes(where);
-	int was_on = !(log.vo_pwr & 1U << 13) && !(log.vo_idle & (1U << 7 | 1U << 23));
-	long_flashes(!log.vo_ok ? (log.vo_power_failed ? 3 : 4) : was_on ? 1 : 2);
+	long_flashes(log.pwrdn_after & 1U << 13 ? 2 : 1);
+	long_flashes(rd(PMU + 0x20) & 1U << 13 ? 2 : 1);
+	long_flashes(fault_count > log.faults_before_reset ? 2 : 1);
 	delay_ms(1500);
 }
 
@@ -403,6 +403,7 @@ void display_start(int running)
 	delay_ms(1);
 	masked(SOFTRST(3), 1U << 4 | 1U << 5 | 1U << 13 | 1U << 14, 0);   // out of reset
 	delay_ms(200);   // let the panel's power drain away completely
+	log.faults_before_reset = fault_count;
 	step_done();     // 4: out of reset
 	dsi_phy_up();
 	step_done();     // 5: DSI host and PHY up
