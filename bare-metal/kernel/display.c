@@ -10,8 +10,8 @@
 //
 // Going down:  panel off -> VOP standby -> panel reset + power off ->
 //              everything held in reset -> clocks -> out of reset
-// Coming up:   VOP -> DSI host + PHY (command mode) -> panel power + reset ->
-//              panel start-up commands -> video mode -> backlight
+// Coming up:   DSI host + PHY (command mode) -> panel power + reset ->
+//              panel start-up commands -> video mode -> VOP -> backlight
 
 #include "backlight.h"
 #include "console.h"
@@ -94,6 +94,7 @@ static struct {
 	int panel_power;         // I2C to the power chip worked (both ways)
 	uint32_t sent, failed;   // panel start-up commands
 	uint32_t vop_same, dsi_same, phy_same;   // read back = what we wrote
+	uint32_t vop_reg, vop_got;               // the first VOP register that differs
 	uint32_t errors0, errors1;               // DSI error flags at the end
 	uint64_t dark_ms, total_ms;
 	int done;
@@ -249,8 +250,15 @@ static void panel_up(void)
 // Read back what we wrote: does the hardware now hold U-Boot's values?
 static void check(void)
 {
-	for (uint32_t i = 0; i < sizeof vop_regs / sizeof vop_regs[0]; i++)
-		log.vop_same += rd(VOP + vop_regs[i][0]) == vop_regs[i][1];
+	for (uint32_t i = 0; i < sizeof vop_regs / sizeof vop_regs[0]; i++) {
+		uint32_t got = rd(VOP + vop_regs[i][0]);
+		if (got == vop_regs[i][1])
+			log.vop_same++;
+		else if (!log.vop_got && !log.vop_reg) {
+			log.vop_reg = vop_regs[i][0];
+			log.vop_got = got;
+		}
+	}
 	for (uint32_t i = 0; i < sizeof dsi_regs / sizeof dsi_regs[0]; i++)
 		log.dsi_same += rd(DSI + dsi_regs[i][0]) == dsi_regs[i][1];
 	for (uint32_t i = 0; i < sizeof phy_regs / sizeof phy_regs[0]; i++)
@@ -269,10 +277,11 @@ void display_takeover(void)
 	delay_ms(1);
 	masked(SOFTRST(3), 1U << 4 | 1U << 5 | 1U << 13 | 1U << 14, 0);   // out of reset
 	delay_ms(200);   // let the panel's power drain away completely
-	vop_up();
 	dsi_phy_up();
 	panel_up();
-	dsi_mode(1);     // video: the VOP's pixels flow to the panel
+	dsi_mode(1);     // video: the host now takes pixels from the VOP...
+	vop_up();        // ...so only now start sending them. Started earlier,
+	                 // they overflow the host's input (DSI error bit 0x80).
 	delay_ms(120);
 	backlight_set(light ? light : 50);
 	log.dark_ms = (now() - start) / 24000;
@@ -321,7 +330,10 @@ void display_takeover_log(void)
 	uint32_t nd = sizeof dsi_regs / sizeof dsi_regs[0];
 	uint32_t np = sizeof phy_regs / sizeof phy_regs[0];
 	row("VOP", log.vop_same == nv);
-	kprintf("%u of %u match U-Boot\n", log.vop_same, nv);
+	if (log.vop_same == nv)
+		kprintf("%u of %u match U-Boot\n", log.vop_same, nv);
+	else
+		kprintf("%u/%u, %03x is %08x\n", log.vop_same, nv, log.vop_reg, log.vop_got);
 	row("DSI", log.dsi_same == nd);
 	kprintf("%u of %u match U-Boot\n", log.dsi_same, nd);
 	row("PHY", log.phy_same == np);
