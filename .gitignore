@@ -11,6 +11,7 @@ tools/love.app/
 bare-metal/kernel/*.o
 bare-metal/kernel/kernel.elf
 bare-metal/kernel/kernel.img
+bare-metal/kernel/uboot.img
 
 # Ghidra's project database: big and changes on every open. The blob and our
 # labelling script are tracked; the project can be rebuilt from them.

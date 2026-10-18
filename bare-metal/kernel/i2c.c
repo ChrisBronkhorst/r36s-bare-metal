@@ -49,7 +49,8 @@ static inline void wr(uintptr_t bus, uint32_t reg, uint32_t v) { *(volatile uint
 static uint32_t wait_for(uintptr_t bus, uint32_t bits)
 {
 	uint64_t start = READ_SYSREG(cntpct_el0);
-	uint64_t limit = READ_SYSREG(cntfrq_el0) / 100;
+	uint64_t freq = READ_SYSREG(cntfrq_el0);
+	uint64_t limit = (freq ? freq : 24000000) / 100;   // in case nobody set it
 	for (;;) {
 		uint32_t ipd = rd(bus, IPD);
 		if (ipd & bits)

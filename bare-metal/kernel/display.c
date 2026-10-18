@@ -14,6 +14,7 @@
 //              panel start-up commands -> video mode -> VOP -> backlight
 
 #include "backlight.h"
+#include "board.h"
 #include "console.h"
 #include "display.h"
 #include "gpio.h"
@@ -129,19 +130,23 @@ static void dsi_mode(int video)
 
 // ---- going down -----------------------------------------------------------------
 
-static void shut_down(void)
+static void shut_down(int running)
 {
-	// Tell the panel: display off (0x28), then sleep (0x10)
-	dsi_mode(0);
-	log.bye = dsi_short(0x05, 0x28, 0) == 0;
-	delay_ms(20);
-	log.bye &= dsi_short(0x05, 0x10, 0) == 0;
-	delay_ms(120);   // the panel needs a moment to enter sleep
+	if (running) {
+		// Tell the panel: display off (0x28), then sleep (0x10)
+		dsi_mode(0);
+		log.bye = dsi_short(0x05, 0x28, 0) == 0;
+		delay_ms(20);
+		log.bye &= dsi_short(0x05, 0x10, 0) == 0;
+		delay_ms(120);   // the panel needs a moment to enter sleep
 
-	// VOP: standby (stops at the end of the current frame), then wait a frame
-	wr(VOP + 0x018, rd(VOP + 0x018) | 1U << 1);
-	wr(VOP + 0x000, 1);          // REG_CFG_DONE: apply
-	delay_ms(30);
+		// VOP: standby (stops at the end of the current frame), wait a frame
+		wr(VOP + 0x018, rd(VOP + 0x018) | 1U << 1);
+		wr(VOP + 0x000, 1);          // REG_CFG_DONE: apply
+		delay_ms(30);
+	} else {
+		log.bye = -1;   // nothing running, nobody to say goodbye to
+	}
 
 	// The panel: into reset, power off
 	gpio_output(PANEL_RESET_BANK, PANEL_RESET_PIN, 0);
@@ -166,14 +171,26 @@ static void clocks(void)
 	// crystal, straight through) while changing it, wait for lock, switch back.
 	masked(CRU + 0xa0, 3U << 2, 0);                    // slow
 	masked(CRU + 0x40, 0x7fff, 2U << 12 | 145);        // postdiv1, fbdiv
-	masked(CRU + 0x44, 0x11ff, 1U << 12 | 1U << 6 | 3); // integer, postdiv2, refdiv
+	masked(CRU + 0x44, 0x31ff, 1U << 12 | 1U << 6 | 3); // powered, integer, postdiv2, refdiv
 	log.cpll_us = wait_for(CRU + 0x44, 1U << 10, 1U << 10, 10000);
 	masked(CRU + 0xa0, 3U << 2, 1U << 2);              // normal
 
 	// Pixel clock dclk_vopb: CPLL / 20 = 29 MHz, not through the
-	// fractional divider; and its gates open
+	// fractional divider
 	masked(CLKSEL(5), 3U << 14 | 1U << 11 | 0xff, 20 - 1);
-	masked(CLKGATE(2), 7U << 2, 0);
+}
+
+// Every clock gate for the display open, as U-Boot left them: the VOP's
+// bus and pixel clocks (CLKGATE2 and 3), the PHY's register clock (16).
+// First thing: touching a block whose register clock is gated can hang
+// the bus.
+static void open_gates(void)
+{
+	wr(CLKGATE(2), 0xffff0000);
+	wr(CLKGATE(3), 0xffff0000);
+	wr(CLKGATE(16), 0xffff0000);
+	// and the big VOP (not the little one) feeds the DSI host
+	wr(0xff140438, 0xffff0000);   // GRF_PD_VO_CON1
 }
 
 // ---- coming up ------------------------------------------------------------------------
@@ -270,12 +287,13 @@ static void check(void)
 	log.errors1 = rd(DSI + DSI_INT_ST1);
 }
 
-void display_takeover(void)
+void display_start(int running)
 {
 	uint64_t start = now();
 	uint32_t light = backlight_get();
 	backlight_set(0);
-	shut_down();
+	open_gates();
+	shut_down(running);
 	clocks();
 	delay_ms(1);
 	masked(SOFTRST(3), 1U << 4 | 1U << 5 | 1U << 13 | 1U << 14, 0);   // out of reset
@@ -304,6 +322,11 @@ static void row(const char *name, int ok)
 	console_color(ok ? GREEN : YELLOW);
 }
 
+int display_done(void)
+{
+	return log.done;
+}
+
 void display_takeover_log(void)
 {
 	console_init(WHITE, BG);
@@ -313,8 +336,8 @@ void display_takeover_log(void)
 		kputs("(not taken over yet)\n");
 		return;
 	}
-	row("Goodbye", log.bye);
-	kputs(log.bye ? "display off, sleep: sent\n" : "panel didn't take it\n");
+	row("Goodbye", log.bye != 0);
+	kputs(log.bye < 0 ? "nothing was running\n" : log.bye ? "display off, sleep: sent\n" : "panel didn't take it\n");
 	row("Clock", log.cpll_us >= 0);
 	if (log.cpll_us >= 0)
 		kprintf("CPLL 580 MHz, lock %ld us\n", log.cpll_us);
@@ -343,6 +366,13 @@ void display_takeover_log(void)
 	kprintf("%u of %u match U-Boot\n", log.phy_same, np);
 	row("Errors", !log.errors0 && !log.errors1);
 	kprintf("DSI %x %x\n", log.errors0, log.errors1);
+	if (log.bye < 0) {   // started without U-Boot: what the loader left
+		row("Loader", 1);
+		kprintf("GPLL mode %x, bus %x\n", board_log.gpll_mode, board_log.clksel3);
+		row("Rails", 1);
+		kprintf("were %02x %02x %02x %02x\n", board_log.rails_before[0],
+			board_log.rails_before[1], board_log.rails_before[2], board_log.rails_before[3]);
+	}
 	row("Dark", 1);
 	kprintf("%lu ms\n", log.dark_ms);
 }

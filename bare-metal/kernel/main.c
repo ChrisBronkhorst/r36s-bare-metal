@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 #include "backlight.h"
+#include "board.h"
 #include "buttons.h"
 #include "console.h"
 #include "display.h"
@@ -194,6 +195,12 @@ static void show_info(uintptr_t device_tree, uint64_t start_ticks)
 		console_color(WHITE);
 		kputs(model ? model : "(none)");
 		kputc('\n');
+	} else if (!dt) {
+		kputs("none: U-Boot didn't start us\n");
+		console_color(GREY);
+		kputs("Loader ");
+		console_color(GREEN);
+		kputs("Rockchip's, ARM TF, then us\n");
 	} else {
 		kprintf("no device tree at %p\n", dt);
 	}
@@ -381,8 +388,9 @@ static void let_go(void)
 static void display_report(void)
 {
 	timer_start(1);
-	uint32_t page = 0, pages = DUMP_PAGES;
-	int ours = 0;
+	int ours = display_done();   // without U-Boot, it already ran
+	uint32_t pages = ours ? DUMP_PAGES + 1 : DUMP_PAGES;
+	uint32_t page = ours ? DUMP_PAGES : 0;   // our log first
 	for (;;) {
 		if (page == DUMP_PAGES)
 			display_takeover_log();
@@ -398,7 +406,7 @@ static void display_report(void)
 			if (ours)
 				restart();
 			let_go();
-			display_takeover();
+			display_start(1);
 			ours = 1;
 			pages = DUMP_PAGES + 1;
 			page = DUMP_PAGES;   // the log first
@@ -498,11 +506,38 @@ static void button_test(void)
 	}
 }
 
-void kmain(uintptr_t device_tree)
+// Without U-Boot, nothing has set up the screen: we make our own.
+// Before the picture is there, the backlight is our only signal:
+// one flash means the power chip answered.
+static void own_screen(void)
+{
+	screen.fb = (volatile uint8_t *)0x3de00000UL;   // where U-Boot put it
+	screen.width = 640;
+	screen.height = 480;
+	screen.pitch = 640 * 3;
+	screen.format = FMT_RGB888;
+	screen.vop = 0xff460000UL;
+	screen.window = 1;
+	rect(0, 0, 640, 480, BG);
+
+	if (board_init() != 0)
+		return;   // no power chip: no backlight, no panel. Stay dark.
+	backlight_set(100);
+	uint64_t t = now();
+	while (now() - t < 24000000 / 4)
+		;
+	backlight_set(0);
+	display_start(0);
+}
+
+// uboot = 1 if U-Boot loaded us, 0 if Rockchip's loader did (start.S)
+void kmain(uintptr_t device_tree, uint64_t uboot)
 {
 	vectors_install();   // from here on, crashes come to us, not U-Boot
 
-	if (!screen_init())
+	if (!uboot)
+		own_screen();
+	else if (!screen_init())
 		return;  // no screen to draw on; start.S parks the CPU
 
 	uint64_t start_ticks = now();

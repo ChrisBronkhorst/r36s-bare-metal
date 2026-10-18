@@ -5,8 +5,14 @@
 // how big we are, and then jumps to the first word (code0), which branches
 // over the rest of the header to real_start.
 //
-// When we get here: the MMU and caches are off, interrupts are masked,
-// x0 holds the address of the device tree, and we are on CPU core 0.
+// Two ways to get here:
+//  - U-Boot loads us at 0x02000000 (where we're linked) and jumps here with
+//    x0 = the device tree.
+//  - Without U-Boot, Rockchip's loader puts us where U-Boot would go,
+//    0x00200000, and ARM Trusted Firmware jumps here. Then we first copy
+//    ourselves to 0x02000000. (The loader insists on U-Boot's address, and
+//    our code has addresses baked in for 0x02000000.)
+// Either way: MMU and data cache off, interrupts masked, CPU core 0.
 
 .section .text.boot
 .global _start
@@ -28,6 +34,34 @@ real_start:
 	and	x1, x1, #0xff
 	cbnz	x1, park
 
+	// Where are we? `adr` gives the address we're running at, `ldr =`
+	// the address the linker gave us. Same: U-Boot loaded us.
+	mov	x20, #1			// x20: 1 = U-Boot started us
+	adr	x1, _start
+	ldr	x2, =_start
+	cmp	x1, x2
+	b.eq	3f
+
+	// Copy code and data (not .bss, that's cleared below) to where we belong.
+	mov	x20, #0
+	mov	x19, #0			// no device tree without U-Boot
+	ldr	x3, =__bss_start
+	sub	x3, x3, x2		// bytes to copy, a multiple of 16
+	mov	x4, x2
+1:	ldp	x5, x6, [x1], #16
+	stp	x5, x6, [x4], #16
+	subs	x3, x3, #16
+	b.gt	1b
+	// The instruction cache may still hold whatever was at the new address:
+	// throw it away, then continue in the copy.
+	dsb	sy
+	ic	iallu
+	dsb	sy
+	isb
+	ldr	x1, =3f
+	br	x1
+3:
+
 	// C expects .bss (uninitialized globals) to start as zero
 	adrp	x1, __bss_start
 	add	x1, x1, :lo12:__bss_start
@@ -44,6 +78,7 @@ real_start:
 	mov	sp, x1
 
 	mov	x0, x19
+	mov	x1, x20
 	bl	kmain
 
 park:	wfe				// sleep until an event, forever

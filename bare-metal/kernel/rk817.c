@@ -87,6 +87,14 @@ int rk817_rail_enable(uint32_t rail, int on)
 	return i2c_write(I2C0, RK817_ADDR, POWER_EN(rail / 4), &value, 1);
 }
 
+int rk817_ldo_set_mv(uint32_t ldo, uint32_t mv)
+{
+	if (ldo < 1 || ldo > 9 || mv < 600 || mv > 3400)
+		return -1;
+	uint8_t sel = (uint8_t)((mv - 600) / 25);
+	return i2c_write(I2C0, RK817_ADDR, LDO_VSEL(ldo - 1), &sel, 1);
+}
+
 int rk817_rails(struct rail rails[RK817_RAILS])
 {
 	static const char *const outputs[RK817_RAILS] = {
