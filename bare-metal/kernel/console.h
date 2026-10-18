@@ -9,6 +9,13 @@
 #define CELL_H 20
 #define MARGIN 8
 
+// the palette
+#define BG     0x10202c
+#define WHITE  0xf0f0f0
+#define GREY   0x8090a0
+#define YELLOW 0xf0d020
+#define GREEN  0x60d070
+
 void console_init(uint32_t fg, uint32_t bg);   // clears the screen
 void console_color(uint32_t fg);
 void console_goto(uint32_t col, uint32_t row);

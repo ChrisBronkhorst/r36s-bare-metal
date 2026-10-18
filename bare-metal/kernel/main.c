@@ -1,4 +1,4 @@
-// Milestone 9: I2C and the power chip.
+// Milestone 10: a report on the display, and who's on the I2C buses.
 //
 // First the kernel describes the machine it woke up on: which CPU, which
 // privilege level, the timer, the screen U-Boot handed us, and the device
@@ -14,27 +14,25 @@
 //
 // On the info page, VOL+ and VOL- set the backlight, and it switches off by
 // itself after 30 seconds without a button press. B shows the power page:
-// the battery and the power chip's outputs, read over I2C.
+// the battery and the power chip's outputs, read over I2C. X shows how
+// U-Boot set up the display, and Y scans the I2C buses for chips.
 
 #include <stdint.h>
 #include "backlight.h"
 #include "buttons.h"
 #include "console.h"
+#include "dump.h"
 #include "exception.h"
 #include "gic.h"
 #include "gpio.h"
 #include "mmu.h"
 #include "rk817.h"
+#include "scan.h"
 #include "screen.h"
 #include "speed.h"
 #include "sysreg.h"
 #include "timer.h"
 
-#define BG     0x10202c
-#define WHITE  0xf0f0f0
-#define GREY   0x8090a0
-#define YELLOW 0xf0d020
-#define GREEN  0x60d070
 #define KEY    0x304050   // a button that isn't pressed
 
 extern char _start[], _end[];
@@ -354,6 +352,53 @@ static void power_page(void)
 	}
 }
 
+// ---- the display report and the I2C scan -------------------------------------
+
+// Wait for a button to go down, and return which
+static uint32_t next_press(void)
+{
+	uint32_t held = buttons_pressed();
+	for (;;) {
+		wait();
+		uint32_t pressed = buttons_pressed(), down = pressed & ~held;
+		held = pressed;
+		if (down)
+			return down;
+	}
+}
+
+static void let_go(void)
+{
+	while (buttons_pressed())
+		wait();
+}
+
+static void display_report(void)
+{
+	timer_start(1);
+	uint32_t page = 0;
+	for (;;) {
+		dump_page(page);
+		uint32_t down = next_press();
+		if (down & bit_of("A"))
+			break;
+		if (down & bit_of("R"))
+			page = (page + 1) % DUMP_PAGES;
+		if (down & bit_of("L"))
+			page = (page + DUMP_PAGES - 1) % DUMP_PAGES;
+	}
+	let_go();
+}
+
+static void scan_page(void)
+{
+	timer_start(1);
+	i2c_scan_page();
+	while (!(next_press() & bit_of("A")))
+		;
+	let_go();
+}
+
 static void button_test(void)
 {
 	console_init(WHITE, BG);
@@ -454,7 +499,7 @@ void kmain(uintptr_t device_tree)
 	buttons_irq_init();
 
 	console_color(YELLOW);
-	kputs("A: buttons  B: power  VOL+/-: light\n");
+	kputs("A buttons B power X display Y I2C\n");
 	uint32_t row = console_row();
 	label("Running");
 	console_goto(0, row + 1);
@@ -504,7 +549,7 @@ void kmain(uintptr_t device_tree)
 				down = 0;
 			}
 		}
-		if (down & (bit_of("A") | bit_of("B")))
+		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y")))
 			break;
 		if (down & (bit_of("VOL+") | bit_of("VOL-"))) {
 			if (down & bit_of("VOL+"))
@@ -543,11 +588,14 @@ void kmain(uintptr_t device_tree)
 		console_goto(8, row + 3);
 		kprintf("%lu.%lu%% of the time   ", awake / 10, awake % 10);
 	}
-	int power = held & bit_of("B");
-	while (buttons_pressed())   // wait for it to be let go
-		wait();
-	if (power)
+	uint32_t chosen = held;
+	let_go();
+	if (chosen & bit_of("B"))
 		power_page();
+	else if (chosen & bit_of("X"))
+		display_report();
+	else if (chosen & bit_of("Y"))
+		scan_page();
 	button_test();
 }
 
