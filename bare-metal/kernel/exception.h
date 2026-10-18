@@ -18,5 +18,11 @@ void irq_register(uint32_t id, void (*handler)(uint32_t id), uint8_t priority);
 // Reset the whole board, through ARM Trusted Firmware. Doesn't return.
 void restart(void);
 
+// While `survive_faults` is set, a data abort doesn't stop us: the first
+// one is recorded here, the faulting instruction is skipped, and we carry
+// on. For bring-up without a screen, where a crash screen can't be seen.
+extern volatile int survive_faults;
+extern volatile uint64_t fault_count, fault_esr, fault_far, fault_elr;
+
 // System calls (`svc #n`) come back. These count them.
 extern volatile uint32_t syscall_count, last_syscall;

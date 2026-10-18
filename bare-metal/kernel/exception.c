@@ -153,6 +153,9 @@ static void irq(void)
 	gic_done(id);
 }
 
+volatile int survive_faults;
+volatile uint64_t fault_count, fault_esr, fault_far, fault_elr;
+
 void exception(uint64_t slot, struct regs *r)
 {
 	if (slot == 5) {   // IRQ, from our own level (offset 0x280)
@@ -165,6 +168,20 @@ void exception(uint64_t slot, struct regs *r)
 	if (slot % 4 == 0 && slot < 8 && esr >> 26 == 0x15) {
 		last_syscall = esr & 0xffff;   // the #n in `svc #n`
 		syscall_count++;
+		return;
+	}
+	// A data abort from our own level (EC 0x25), while asked to survive
+	if (survive_faults && slot % 4 == 0 && slot < 8 && esr >> 26 == 0x25) {
+		uint64_t elr = EL_REG(elr);
+		if (!fault_count++) {
+			fault_esr = esr;
+			fault_far = EL_REG(far);
+			fault_elr = elr;
+		}
+		if (current_el() == 2)
+			__asm__ volatile("msr elr_el2, %0" : : "r"(elr + 4));
+		else
+			__asm__ volatile("msr elr_el1, %0" : : "r"(elr + 4));
 		return;
 	}
 	crash_screen(slot, r);

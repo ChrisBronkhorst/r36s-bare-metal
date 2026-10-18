@@ -16,6 +16,7 @@
 #include "backlight.h"
 #include "board.h"
 #include "console.h"
+#include "exception.h"
 #include "display.h"
 #include "gpio.h"
 #include "rk817.h"
@@ -307,6 +308,7 @@ void display_start(int running)
 	uint64_t start = now();
 	uint32_t light = backlight_get();
 	flashing = !running;
+	survive_faults = !running;
 	backlight_set(0);
 	open_gates();
 	shut_down(running);
@@ -326,6 +328,7 @@ void display_start(int running)
 	vop_up();        // ...so only now start sending them. Started earlier,
 	                 // they overflow the host's input (DSI error bit 0x80).
 	step_done();     // 8: VOP running
+	survive_faults = 0;
 	delay_ms(120);
 	backlight_set(light ? light : 50);
 	log.dark_ms = (now() - start) / 24000;
@@ -395,6 +398,12 @@ void display_takeover_log(void)
 		row("Rails", 1);
 		kprintf("were %02x %02x %02x %02x\n", board_log.rails_before[0],
 			board_log.rails_before[1], board_log.rails_before[2], board_log.rails_before[3]);
+	}
+	if (fault_count) {
+		row("Faults", 0);
+		kprintf("%lu, first at %lx\n", fault_count, fault_far);
+		row("", 0);
+		kprintf("pc %lx esr %lx\n", fault_elr, fault_esr);
 	}
 	row("Dark", 1);
 	kprintf("%lu ms\n", log.dark_ms);
