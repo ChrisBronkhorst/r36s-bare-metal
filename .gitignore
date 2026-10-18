@@ -12,6 +12,10 @@ bare-metal/kernel/*.o
 bare-metal/kernel/kernel.elf
 bare-metal/kernel/kernel.img
 bare-metal/kernel/uboot.img
+bare-metal/monitor/*.o
+bare-metal/monitor/monitor.elf
+bare-metal/monitor/monitor.bin
+bare-metal/monitor/trust.img
 
 # Ghidra's project database: big and changes on every open. The blob and our
 # labelling script are tracked; the project can be rebuilt from them.
@@ -22,3 +26,4 @@ bare-metal/ddr-blob/u-boot-src/
 
 .DS_Store
 ._*
+__pycache__/

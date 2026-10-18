@@ -366,35 +366,6 @@ static void step_done(void)
 	delay_ms(450);
 }
 
-static void long_flashes(uint32_t n)
-{
-	delay_ms(1500);
-	for (uint32_t i = 0; i < n; i++) {
-		backlight_set(100);
-		delay_ms(600);
-		backlight_set(0);
-		delay_ms(600);
-	}
-}
-
-// After the 8 short flashes, in case there's no picture: two groups of
-// long flashes.
-//   first group:  did our write to the power switch stick? (PMU+0x18
-//                 bit 13 read back) 1 = yes, 2 = no, still "off"
-//   second group: does the domain say it's on? (PMU+0x20 bit 13, read
-//                 now) 1 = on, 2 = off
-//   third group:  faults once the display was out of reset (steps 5-8)?
-//                 1 = none, 2 = some
-static void report(void)
-{
-	if (!flashing)
-		return;
-	long_flashes(log.pwrdn_after & 1U << 13 ? 2 : 1);
-	long_flashes(rd(PMU + 0x20) & 1U << 13 ? 2 : 1);
-	long_flashes(fault_count > log.faults_before_reset ? 2 : 1);
-	delay_ms(1500);
-}
-
 void display_start(int running)
 {
 	uint64_t start = now();
@@ -430,7 +401,6 @@ void display_start(int running)
 	                 // they overflow the host's input (DSI error bit 0x80).
 	step_done();     // 8: VOP running
 	survive_faults = 0;
-	report();
 	delay_ms(120);
 	backlight_set(light ? light : 50);
 	log.dark_ms = (now() - start) / 24000;

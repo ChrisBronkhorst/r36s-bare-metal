@@ -57,8 +57,8 @@ static const char *fault_name(uint32_t fsc)
 
 void restart(void)
 {
-	// Ask ARM Trusted Firmware (one level up, EL3) to reset the board:
-	// PSCI SYSTEM_RESET, the same call Linux makes for `reboot`.
+	// Ask EL3 (ARM Trusted Firmware, or our own monitor) to reset the
+	// board: PSCI SYSTEM_RESET, the same call Linux makes for `reboot`.
 	register uint64_t x0 __asm__("x0") = 0x84000009;
 	__asm__ volatile("smc #0" : "+r"(x0) : : "x1", "x2", "x3", "memory");
 	for (;;)

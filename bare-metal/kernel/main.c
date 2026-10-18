@@ -28,6 +28,7 @@
 #include "gic.h"
 #include "gpio.h"
 #include "mmu.h"
+#include "monitor.h"
 #include "rk817.h"
 #include "scan.h"
 #include "screen.h"
@@ -200,7 +201,8 @@ static void show_info(uintptr_t device_tree, uint64_t start_ticks)
 		console_color(GREY);
 		kputs("Loader ");
 		console_color(GREEN);
-		kputs("Rockchip's, ARM TF, then us\n");
+		kputs(monitor_ours() ? "Rockchip's, our EL3, then us\n"
+				     : "Rockchip's, ARM TF, then us\n");
 	} else {
 		kprintf("no device tree at %p\n", dt);
 	}
@@ -429,6 +431,21 @@ static void scan_page(void)
 	let_go();
 }
 
+// What's at EL3. Y tries to read the monitor's memory.
+static void el3_page(void)
+{
+	timer_start(1);
+	monitor_page();
+	for (;;) {
+		uint32_t down = next_press();
+		if (down & bit_of("A"))
+			break;
+		if (down & bit_of("Y") && monitor_ours())
+			monitor_peek(18);
+	}
+	let_go();
+}
+
 static void button_test(void)
 {
 	console_init(WHITE, BG);
@@ -561,7 +578,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	buttons_irq_init();
 
 	console_color(YELLOW);
-	kputs("A buttons B power X display Y I2C\n");
+	kputs("A keys B power X LCD Y I2C START EL3\n");
 	uint32_t row = console_row();
 	label("Running");
 	console_goto(0, row + 1);
@@ -611,7 +628,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 				down = 0;
 			}
 		}
-		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y")))
+		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y") | bit_of("START")))
 			break;
 		if (down & (bit_of("VOL+") | bit_of("VOL-"))) {
 			if (down & bit_of("VOL+"))
@@ -658,6 +675,8 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 		display_report();
 	else if (chosen & bit_of("Y"))
 		scan_page();
+	else if (chosen & bit_of("START"))
+		el3_page();
 	button_test();
 }
 
