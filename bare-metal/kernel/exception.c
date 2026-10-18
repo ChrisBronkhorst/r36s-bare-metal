@@ -6,7 +6,6 @@
 #include "console.h"
 #include "exception.h"
 #include "gic.h"
-#include "timer.h"
 #include "sysreg.h"
 
 #define RED    0x801818
@@ -128,14 +127,24 @@ static void crash_screen(uint64_t slot, struct regs *r)
 	restart();
 }
 
+// Who handles which interrupt. The RK3326 uses numbers up to about 160.
+#define MAX_IRQ 192
+static void (*handlers[MAX_IRQ])(uint32_t id);
+
+void irq_register(uint32_t id, void (*handler)(uint32_t id), uint8_t priority)
+{
+	handlers[id] = handler;
+	gic_enable(id, priority);
+}
+
 // An interrupt: ask the GIC which one, handle it, tell the GIC we're done.
 static void irq(void)
 {
 	uint32_t id = gic_ack();
 	if (id == GIC_SPURIOUS)   // it went away before we asked
 		return;
-	if (id == TIMER_IRQ)
-		timer_interrupt();
+	if (id < MAX_IRQ && handlers[id])
+		handlers[id](id);
 	gic_done(id);
 }
 

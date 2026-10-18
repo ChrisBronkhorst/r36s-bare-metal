@@ -22,6 +22,13 @@ static const uintptr_t gpio_base[4] = {
 #define GPIO_DDR  0x04   // direction: 1 = output
 #define GPIO_EXT  0x50   // what the pins actually read right now
 
+// GPIO interrupt registers, a bit per pin
+#define GPIO_INTEN    0x30   // 1 = this pin can interrupt
+#define GPIO_INTMASK  0x34   // 1 = ...but not right now
+#define GPIO_INTTYPE  0x38   // 0 = while at a level, 1 = on an edge
+#define GPIO_POLARITY 0x3c   // 0 = low (or falling), 1 = high (or rising)
+#define GPIO_STATUS   0x40   // which pins are interrupting
+
 static inline uint32_t read32(uintptr_t addr)
 {
 	return *(volatile uint32_t *)addr;
@@ -66,6 +73,37 @@ void gpio_output(uint32_t bank, uint32_t pin, int on)
 	uint32_t level = read32(base + GPIO_DR);
 	write32(base + GPIO_DR, on ? level | 1U << pin : level & ~(1U << pin));
 	write32(base + GPIO_DDR, read32(base + GPIO_DDR) | 1U << pin);
+}
+
+// This controller can't interrupt on "either edge". So we use a trick
+// (Linux does too): interrupt while the pin is at the level it's NOT at now.
+// When it changes, it interrupts; the handler flips the polarity to the new
+// opposite, which stops the interrupt until the next change.
+static void set_bit(uintptr_t reg, uint32_t pin, int on)
+{
+	uint32_t v = read32(reg);
+	write32(reg, on ? v | 1U << pin : v & ~(1U << pin));
+}
+
+void gpio_watch(uint32_t bank, uint32_t pin)
+{
+	uintptr_t base = gpio_base[bank];
+	int level = read32(base + GPIO_EXT) >> pin & 1;
+	set_bit(base + GPIO_INTTYPE, pin, 0);         // level-triggered
+	set_bit(base + GPIO_POLARITY, pin, !level);   // the level it isn't at
+	set_bit(base + GPIO_INTMASK, pin, 0);
+	set_bit(base + GPIO_INTEN, pin, 1);
+}
+
+uint32_t gpio_changed(uint32_t bank)
+{
+	uintptr_t base = gpio_base[bank];
+	uint32_t changed = read32(base + GPIO_STATUS);
+	uint32_t level = read32(base + GPIO_EXT);
+	uint32_t polarity = read32(base + GPIO_POLARITY);
+	// for the pins that changed: now interrupt on the opposite of the new level
+	write32(base + GPIO_POLARITY, (polarity & ~changed) | (~level & changed));
+	return changed;
 }
 
 uint32_t gpio_read(uint32_t bank)

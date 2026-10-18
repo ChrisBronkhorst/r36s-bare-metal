@@ -13,3 +13,9 @@ extern const uint32_t button_count;
 
 void buttons_init(void);
 uint32_t buttons_pressed(void);   // bit n set = buttons[n] is down
+
+// Interrupts from the buttons' GPIO banks: from now on, any button change
+// interrupts the CPU (and so wakes it from wfi).
+void buttons_irq_init(void);
+extern volatile uint64_t button_irqs;      // GPIO interrupts so far
+extern volatile uint64_t button_changes;   // pin changes they reported

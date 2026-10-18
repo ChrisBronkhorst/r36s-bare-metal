@@ -7,6 +7,7 @@
 // odroidgo3-joypad. The analog sticks aren't here: they go through the ADC.
 
 #include "buttons.h"
+#include "exception.h"
 #include "gpio.h"
 
 const struct button buttons[] = {
@@ -39,6 +40,24 @@ void buttons_init(void)
 {
 	for (uint32_t i = 0; i < button_count; i++)
 		gpio_input_pullup(buttons[i].bank, buttons[i].pin);
+}
+
+volatile uint64_t button_irqs, button_changes;
+
+static void button_interrupt(uint32_t id)
+{
+	uint32_t changed = gpio_changed(id - GPIO_IRQ(0));
+	button_irqs++;
+	for (; changed; changed &= changed - 1)   // count the bits
+		button_changes++;
+}
+
+void buttons_irq_init(void)
+{
+	for (uint32_t i = 0; i < button_count; i++)
+		gpio_watch(buttons[i].bank, buttons[i].pin);
+	for (uint32_t bank = 1; bank <= 3; bank++)
+		irq_register(GPIO_IRQ(bank), button_interrupt, 0x80);
 }
 
 uint32_t buttons_pressed(void)

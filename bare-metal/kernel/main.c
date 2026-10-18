@@ -1,4 +1,4 @@
-// Milestone 6: timer interrupts.
+// Milestone 7: button interrupts.
 //
 // First the kernel describes the machine it woke up on: which CPU, which
 // privilege level, the timer, the screen U-Boot handed us, and the device
@@ -9,7 +9,8 @@
 // Before all that, it times three small jobs with the caches off (as U-Boot
 // left them), turns on the MMU and caches, and times them again. Then it
 // switches on interrupts: the timer interrupts 60 times a second, and in
-// between, the CPU sleeps.
+// between, the CPU sleeps. On the button test the timer slows to once a
+// second, and the buttons themselves interrupt (and wake) the CPU.
 
 #include <stdint.h>
 #include "buttons.h"
@@ -120,9 +121,7 @@ static void interrupts_on(void)
 		__asm__ volatile("msr hcr_el2, %0\nisb" : : "r"(hcr | 1UL << 4));
 	}
 	gic_init();
-	gic_enable(TIMER_IRQ, 0x80);
-	timer_start(60);
-	__asm__ volatile("msr daifclr, #2" ::: "memory");   // unmask IRQs: I = 0
+	timer_start(60);   // registers its handler, and unmasks IRQs: I = 0
 }
 
 static uint64_t now(void)
@@ -249,10 +248,34 @@ static void button_test(void)
 	for (uint32_t i = 0; i < button_count; i++)
 		draw_button(&buttons[i], 0);
 
+	// Only a heartbeat from the timer now: the buttons wake us themselves.
+	timer_start(1);
+
 	uint32_t shown = 0;
+	uint64_t by_button = 0, by_timer = 0, presses = 0;
+	uint64_t irqs_seen = button_irqs, ticks_seen = timer_ticks;
 	for (;;) {
-		wait();   // look again after the next timer tick: 60 times a second
+		wait();
+		// what woke us?
+		if (button_irqs != irqs_seen)
+			by_button++;
+		else if (timer_ticks != ticks_seen)
+			by_timer++;
+		irqs_seen = button_irqs;
+		ticks_seen = timer_ticks;
+
+		console_color(WHITE);
+		console_goto(0, 19);
+		kprintf("Woke by buttons %lu, timer %lu   ", by_button, by_timer);
+
 		uint32_t pressed = buttons_pressed();
+		for (uint32_t down = pressed & ~shown; down; down &= down - 1)
+			presses++;
+		// A clean press and release is 2 changes. More means the switch
+		// "bounced": its contacts rattled, and each rattle is a change.
+		console_goto(0, 22);
+		console_color(GREY);
+		kprintf("IRQs %lu changes %lu presses %lu   ", irqs_seen, button_changes, presses);
 		if (pressed == shown)
 			continue;
 		for (uint32_t i = 0; i < button_count; i++) {
@@ -312,6 +335,7 @@ void kmain(uintptr_t device_tree)
 	interrupts_on();
 	show_info(device_tree, start_ticks);
 	buttons_init();
+	buttons_irq_init();
 
 	kputc('\n');
 	console_color(YELLOW);

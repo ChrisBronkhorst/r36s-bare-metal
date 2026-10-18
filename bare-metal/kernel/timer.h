@@ -5,8 +5,7 @@
 
 #define TIMER_IRQ 30   // the non-secure physical timer: PPI 14, 16 + 14
 
-void timer_start(uint32_t hz);
-void timer_interrupt(void);   // called by the IRQ handler
+void timer_start(uint32_t hz);   // also changes the rate if it's running
 
 extern volatile uint64_t timer_ticks;   // interrupts so far
 

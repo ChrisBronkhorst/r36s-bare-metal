@@ -12,5 +12,8 @@ void vectors_install(void);   // vectors.S: point VBAR at our table
 // Called by vectors.S for every exception. Returns only for system calls.
 void exception(uint64_t slot, struct regs *r);
 
+// Run handler(id) whenever interrupt `id` arrives (and enable it in the GIC).
+void irq_register(uint32_t id, void (*handler)(uint32_t id), uint8_t priority);
+
 // System calls (`svc #n`) come back. These count them.
 extern volatile uint32_t syscall_count, last_syscall;

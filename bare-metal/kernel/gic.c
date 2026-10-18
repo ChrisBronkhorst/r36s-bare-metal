@@ -17,6 +17,7 @@
 #define GICD_ISENABLER  0x100   // write 1 to enable, 32 interrupts per register
 #define GICD_ISPENDR    0x200   // read: which are pending
 #define GICD_IPRIORITYR 0x400   // one byte per interrupt
+#define GICD_ITARGETSR  0x800   // one byte per interrupt: bit n = core n
 
 #define GICC_CTLR 0x00
 #define GICC_PMR  0x04   // priority mask: only more urgent than this get through
@@ -33,11 +34,21 @@ void gic_init(void)
 	write32(GICC + GICC_CTLR, 1);    // CPU interface: signal group 1 as IRQ
 }
 
+// Set one interrupt's byte in a byte-per-interrupt register
+static void set_byte(uintptr_t reg, uint32_t id, uint8_t value)
+{
+	uintptr_t addr = reg + (id & ~3U);
+	uint32_t shift = (id & 3) * 8;
+	write32(addr, (read32(addr) & ~(0xffU << shift)) | (uint32_t)value << shift);
+}
+
 void gic_enable(uint32_t id, uint8_t priority)
 {
-	uintptr_t prio = GICD + GICD_IPRIORITYR + (id & ~3U);
-	uint32_t shift = (id & 3) * 8;
-	write32(prio, (read32(prio) & ~(0xffU << shift)) | (uint32_t)priority << shift);
+	set_byte(GICD + GICD_IPRIORITYR, id, priority);
+	// A shared interrupt only goes to the cores in its target byte, which
+	// starts out empty. (Private ones always go to their own core.)
+	if (id >= 32)
+		set_byte(GICD + GICD_ITARGETSR, id, 1 << 0);   // core 0
 	write32(GICD + GICD_ISENABLER + id / 32 * 4, 1U << (id % 32));
 }
 
