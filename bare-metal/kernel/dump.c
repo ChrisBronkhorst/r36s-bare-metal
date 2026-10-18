@@ -127,13 +127,15 @@ static void summary(void)
 	name("Frame");  // in lines
 	kprintf("%u: sync %u back %u fr %u\n", vtotal, vsync, vst - vsync, vtotal - vend);
 
+	// The VOP can stack 3 windows (layers). U-Boot uses window 1, a
+	// simpler one without scaling, and leaves window 0 off.
 	static const char *const formats[8] = { "ARGB8888", "RGB888", "RGB565", "?", "YUV420", "YUV422", "YUV444", "?" };
-	uint32_t win = rd(VOP + 0x50), act = rd(VOP + 0x68);
+	uint32_t w0 = rd(VOP + 0x50), w1 = rd(VOP + 0x90), info = rd(VOP + 0xa4);
 	name("Window");
-	kprintf("%s %ux%u %s\n", formats[win >> 1 & 7], (act & 0x1fff) + 1, (act >> 16 & 0x1fff) + 1,
-		win & 1 ? "on" : "OFF");
+	kprintf("0 %s, 1 %s %s %ux%u\n", w0 & 1 ? "on" : "off", w1 & 1 ? "on" : "off",
+		formats[w1 >> 4 & 7], (info & 0xfff) + 1, (info >> 16 & 0xfff) + 1);
 	name("Reads");
-	kprintf("%08x, %u bytes/line\n", rd(VOP + 0x60), (rd(VOP + 0x5c) & 0x3fff) * 4);
+	kprintf("%08x, %u bytes/line\n", rd(VOP + 0xa0), (rd(VOP + 0x98) & 0x1fff) * 4);
 	uint32_t ctrl0 = rd(VOP + 0x20), ctrl2 = rd(VOP + 0x28);
 	name("Out");
 	kprintf("MIPI %s, RGB %s, %s%s\n", ctrl0 >> 24 & 1 ? "on" : "off", ctrl0 & 1 ? "on" : "off",
@@ -229,12 +231,12 @@ static void dsi_raw(void)
 		word(off, rd(DSI + off));
 }
 
-static void phy_raw(void)
+// Two pages: registers first to last-1, not zero. A register's number is
+// its byte address / 4.
+static void phy_raw(uint32_t first, uint32_t last)
 {
-	kputs("PHY at ff2e0000, not zero.\n");
-	console_color(GREY);
-	kputs("Register = byte address / 4:\n");
-	for (uint32_t r = 0; r < 256; r++) {
+	kprintf("PHY at ff2e0000, regs %02x-%02x:\n", first, last - 1);
+	for (uint32_t r = first; r < last; r++) {
 		uint32_t v = phy(r >> 5, r & 31);
 		if (!v || !room(6))
 			continue;
@@ -278,7 +280,7 @@ void dump_page(uint32_t page)
 {
 	static const char *const titles[DUMP_PAGES] = {
 		"The display, as U-Boot left it", "VOP registers", "DSI host registers",
-		"Video PHY registers", "Clock registers" };
+		"Video PHY registers", "Video PHY registers", "Clock registers" };
 	console_init(WHITE, BG);
 	console_color(YELLOW);
 	kprintf("%u/%u %s\n", page + 1, DUMP_PAGES, titles[page]);
@@ -289,8 +291,9 @@ void dump_page(uint32_t page)
 	case 0: summary(); break;
 	case 1: vop_raw(); break;
 	case 2: dsi_raw(); break;
-	case 3: phy_raw(); break;
-	case 4: misc_raw(); break;
+	case 3: phy_raw(0x00, 0x80); break;   // analog, digital, clock lane, lane 0
+	case 4: phy_raw(0x80, 0x100); break;  // lanes 1-3, LVDS
+	case 5: misc_raw(); break;
 	}
 	if (page) {
 		console_goto(0, 21);
