@@ -215,3 +215,11 @@ const char *ram_save(void)
 	}
 	return 0;
 }
+
+// After a failed save: how far the card driver got, and the controller's state
+void ram_card_info(void)
+{
+	kprintf("step %u cmd %u err %x rint %x\n", sd.step, sd.last_cmd, sd_last_err, sd.last_status);
+	kprintf("ctrl %x stat %x div %x ena %x cmd %x\n", rd(0xff370000), rd(0xff370048),
+		rd(0xff370008), rd(0xff370010), rd(0xff37002c));
+}

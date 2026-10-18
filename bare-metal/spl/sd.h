@@ -11,6 +11,7 @@ struct sd_info {
 	uint32_t sectors_read;
 };
 extern struct sd_info sd;
+extern uint32_t sd_last_err;
 
 int sd_init(void);   // 0 when the card is ready to read
 int sd_read(uint32_t sector, uint32_t count, void *dst);   // 0 on success

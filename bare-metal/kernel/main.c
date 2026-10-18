@@ -449,6 +449,11 @@ static void ram_screen(void)
 			console_goto(0, 21);
 			console_color(err ? ALERT : GREEN);
 			kprintf("%s                ", err ? err : "Saved to sector 12288");
+			if (err) {
+				console_goto(0, 19);
+				console_color(WHITE);
+				ram_card_info();
+			}
 		}
 	}
 	let_go();

@@ -72,6 +72,7 @@
 #define R7     (C_RESP | C_CRC)            // echo of CMD8's check pattern
 
 struct sd_info sd;
+uint32_t sd_last_err;   // the last failed command's error bits
 
 static inline uint32_t rd(uintptr_t a) { return *(volatile uint32_t *)a; }
 static inline void wr(uintptr_t a, uint32_t v) { *(volatile uint32_t *)a = v; }
@@ -119,13 +120,15 @@ static int set_clock(uint32_t div)
 static uint32_t command(uint32_t index, uint32_t arg, uint32_t flags, uint32_t resp[4])
 {
 	if (wait_for(SD + STATUS, 1U << 9, 0, 500))   // card still busy
-		return 0x10000;
+		return sd_last_err = 0x10000;
 	wr(SD + RINTSTS, 0xffffffff);   // clear old events (write 1 to clear)
 	wr(SD + CMDARG, arg);
 	wr(SD + CMD, C_START | C_HOLD | flags | index);
 	if (wait_for(SD + RINTSTS, I_CMD_DONE, I_CMD_DONE, 500))
-		return 0x20000;
+		return sd_last_err = 0x20000;
 	uint32_t errors = rd(SD + RINTSTS) & I_CMD_ERRS;
+	if (errors)
+		sd_last_err = errors;
 	sd.last_cmd = index;
 	sd.last_status = rd(SD + RINTSTS);
 	if (errors)
