@@ -1,12 +1,14 @@
 #!/bin/bash
 # Swap what Rockchip's loader starts, on the learning console's card:
 #
+#   ./card-loader.sh spl      our SPL, monitor and kernel: only the boot ROM and
+#                             Rockchip's RAM setup are left
 #   ./card-loader.sh monitor  our kernel, and our monitor at EL3 (no U-Boot, no ATF)
 #   ./card-loader.sh ours     our kernel instead of U-Boot, ARM Trusted Firmware at EL3
 #   ./card-loader.sh uboot    the originals: U-Boot, ATF and OP-TEE
 #
 # The card's boot area (before the first partition):
-#   sector    64  Rockchip's loader: memory setup, then loads the next two
+#   sector    64  Rockchip's RAM setup + loader      <- swapped: RAM setup + our SPL
 #   sector 16384  "uboot.img": U-Boot, 4 copies      <- swapped: our kernel
 #   sector 24576  "trust.img": ATF and OP-TEE, 2 copies <- swapped: our monitor
 #   sector 32768  the BOOT partition
@@ -14,7 +16,7 @@
 set -e
 cd "$(dirname "$0")"
 what=$1
-case "$what" in monitor|ours|uboot) ;; *) echo "usage: $0 monitor|ours|uboot"; exit 1 ;; esac
+case "$what" in spl|monitor|ours|uboot) ;; *) echo "usage: $0 spl|monitor|ours|uboot"; exit 1 ;; esac
 
 boot=/Volumes/BOOT
 [ -f "$boot/boot.ini" ] || { echo "No BOOT partition mounted at $boot. Is the card in?"; exit 1; }
@@ -47,13 +49,17 @@ assert h[24576 * 512:][:4] == b"BL3X", "no trust image at sector 24576"
 PY
 make uboot.img >/dev/null
 make -C ../monitor trust.img >/dev/null
+make -C ../spl idbloader.img >/dev/null
 mkdir -p backup
+# The boot ROM's slot runs from sector 64 to 2047 (31 x 32 KB): pad ours to that
+head -c $((31 * 32768)) /dev/zero > "$tmp/idb"
+dd if=../spl/idbloader.img of="$tmp/idb" conv=notrunc 2>/dev/null
 
-# One slot: its name, offset and size (MB), our image, the backup of the
-# original, and which of the two it should hold
+# One slot: its name, offset and size (in 32 KB blocks), our image, the
+# backup of the original, and which of the two it should hold
 swap() {
   local name=$1 at=$2 mb=$3 ours=$4 stock=$5 want=$6
-  dd if=$raw of="$tmp/now" bs=1m skip=$at count=$mb 2>/dev/null
+  dd if=$raw of="$tmp/now" bs=32k skip=$at count=$mb 2>/dev/null
   if [ ! -f "$stock" ]; then
     cmp -s "$tmp/now" "$ours" && { echo "Ours is already in the $name slot, and there's no backup of the original."; exit 1; }
     cp "$tmp/now" "$stock"
@@ -64,19 +70,20 @@ swap() {
     echo "$name: already there."
   else
     diskutil unmountDisk "$disk" >/dev/null
-    dd if="$new" of=$raw bs=1m seek=$at 2>/dev/null
-    dd if=$raw of="$tmp/check" bs=1m skip=$at count=$mb 2>/dev/null
+    dd if="$new" of=$raw bs=32k seek=$at 2>/dev/null
+    dd if=$raw of="$tmp/check" bs=32k skip=$at count=$mb 2>/dev/null
     cmp -s "$tmp/check" "$new" || { echo "$name: read back differs! Don't boot from it; run again."; exit 1; }
     echo "$name: written and read back ($want)."
   fi
 }
+U="swap uboot.img 256 128 uboot.img backup/uboot-stock.img"
+T="swap trust.img 384 128 ../monitor/trust.img backup/trust-stock.img"
+I="swap idbloader 1 31 $tmp/idb backup/idb-stock.img"
 case "$what" in
-  monitor) swap uboot.img 8 4 uboot.img backup/uboot-stock.img ours
-           swap trust.img 12 4 ../monitor/trust.img backup/trust-stock.img ours ;;
-  ours)    swap uboot.img 8 4 uboot.img backup/uboot-stock.img ours
-           swap trust.img 12 4 ../monitor/trust.img backup/trust-stock.img stock ;;
-  uboot)   swap uboot.img 8 4 uboot.img backup/uboot-stock.img stock
-           swap trust.img 12 4 ../monitor/trust.img backup/trust-stock.img stock ;;
+  spl)     $U ours;  $T ours;  $I ours ;;
+  monitor) $U ours;  $T ours;  $I stock ;;
+  ours)    $U ours;  $T stock; $I stock ;;
+  uboot)   $U stock; $T stock; $I stock ;;
 esac
 sync
 diskutil eject "$disk" >/dev/null && echo "Ejected. Put the card in the learning console."

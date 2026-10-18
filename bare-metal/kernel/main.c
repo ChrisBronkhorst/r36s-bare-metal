@@ -201,8 +201,9 @@ static void show_info(uintptr_t device_tree, uint64_t start_ticks)
 		console_color(GREY);
 		kputs("Loader ");
 		console_color(GREEN);
-		kputs(monitor_ours() ? "Rockchip's, our EL3, then us\n"
-				     : "Rockchip's, ARM TF, then us\n");
+		kputs(spl_report() ? "our SPL, our EL3, then us\n"
+		      : monitor_ours() ? "Rockchip's, our EL3, then us\n"
+				       : "Rockchip's, ARM TF, then us\n");
 	} else {
 		kprintf("no device tree at %p\n", dt);
 	}
@@ -431,17 +432,25 @@ static void scan_page(void)
 	let_go();
 }
 
-// What's at EL3. Y tries to read the monitor's memory.
+// What's at EL3 (Y tries to read the monitor's memory); R: our SPL
 static void el3_page(void)
 {
 	timer_start(1);
 	monitor_page();
+	int spl = 0;
 	for (;;) {
 		uint32_t down = next_press();
 		if (down & bit_of("A"))
 			break;
-		if (down & bit_of("Y") && monitor_ours())
+		if (down & bit_of("Y") && monitor_ours() && !spl)
 			monitor_peek(18);
+		if (down & (bit_of("L") | bit_of("R"))) {
+			spl = !spl;
+			if (spl)
+				spl_page();
+			else
+				monitor_page();
+		}
 	}
 	let_go();
 }

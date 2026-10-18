@@ -27,3 +27,7 @@ bare-metal/ddr-blob/u-boot-src/
 .DS_Store
 ._*
 __pycache__/
+bare-metal/spl/*.o
+bare-metal/spl/spl.elf
+bare-metal/spl/spl.bin
+bare-metal/spl/idbloader.img

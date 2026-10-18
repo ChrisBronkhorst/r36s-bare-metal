@@ -144,5 +144,76 @@ void monitor_page(void)
 	kprintf("%lu, this page's too\n", smc(SMC_REPORT, R_SMCS, 0));
 	console_goto(0, 22);
 	console_color(YELLOW);
-	kputs("Y: peek at the monitor  A: buttons");
+	kputs("Y: peek  R: SPL page  A: buttons");
+}
+
+// ---- our SPL's report ---------------------------------------------------
+// The SPL can't call us (it's gone by the time we run), so it leaves a
+// report in memory at a fixed address, marked with a magic number.
+
+#include "../spl/report.h"
+
+const struct spl_report *spl_report(void)
+{
+	const struct spl_report *r = (const struct spl_report *)SPL_REPORT;
+	return r->magic == SPL_MAGIC ? r : 0;
+}
+
+void spl_page(void)
+{
+	const struct spl_report *r = spl_report();
+	console_init(WHITE, BG);
+	console_color(YELLOW);
+	if (!r) {
+		kputs("Rockchip's loader started us\n");
+		label("SPL");
+		kputs("not ours: no report found\n");
+	} else {
+		const struct sd_info *s = &r->sd;
+		kputs("Our own SPL!\n");
+		label("Level");
+		kprintf("EL%u, from the boot ROM\n", r->el);
+		label("Started");
+		kprintf("%lu ms after power-on\n", r->ticks_in / 24000);
+		label("Card");
+		kprintf("ready in %lu ms\n", (r->ticks_card - r->ticks_in) / 24000);
+		// CID: maker ID (byte 15), name (5 letters, bytes 12-8)
+		char name[6];
+		for (int i = 0; i < 5; i++)
+			name[i] = s->cid[(12 - i) / 4] >> ((12 - i) % 4 * 8) & 0xff;
+		name[5] = 0;
+		label("");
+		kprintf("maker %02x \"%s\"\n", s->cid[3] >> 24, name);
+		// CSD version 2 (SDHC/SDXC): size = (C_SIZE + 1) x 512 KB, with
+		// C_SIZE in bits 48-69 of the 128 (csd[3] holds bits 96-127)
+		uint32_t c_size = (s->csd[2] & 0x3f) << 16 | s->csd[1] >> 16;
+		label("");
+		if (s->csd[3] >> 30 == 1)
+			kprintf("%lu MB, %s\n", ((uint64_t)c_size + 1) / 2, s->high_capacity ? "SDHC/XC" : "SDSC");
+		else
+			kprintf("%s, old CSD format\n", s->high_capacity ? "SDHC/XC" : "SDSC");
+		label("Clock");
+		kprintf("was %08x %08x\n", s->clksel16_was, s->clksel17_was);
+		label("");
+		kprintf("div %u; now 24 MHz /2 /1\n", s->clkdiv_was);
+		label("Read");
+		uint64_t us = (r->ticks_out - r->ticks_card) / 24;
+		kprintf("%u KB in %lu ms", s->sectors_read / 2, us / 1000);
+		if (us)
+			kprintf(", %lu KB/s", (uint64_t)s->sectors_read * 512 * 1000 / 1024 * 1000 / us);
+		kputc('\n');
+		label("Kernel");
+		kprintf("%x, %u bytes, CRC %s\n", r->kernel_addr, r->kernel_size, r->kernel_crc_ok ? "ok" : "BAD");
+		label("Monitor");
+		kprintf("%x, %u bytes\n", r->monitor_addr, r->monitor_size);
+		label("Clocks");
+		kprintf("CPU PLL %s, GPLL %s\n", (r->cru_mode & 3) == 1 ? "on" : "slow",
+			(r->pmucru_mode & 3) == 1 ? "on" : "slow");
+		label("");
+		kprintf("mode %04x %04x sel0 %04x\n", r->cru_mode & 0xffff, r->pmucru_mode & 0xffff,
+			r->clksel0 & 0xffff);
+	}
+	console_goto(0, 22);
+	console_color(YELLOW);
+	kputs("L: EL3 page  A: buttons");
 }
