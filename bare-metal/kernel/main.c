@@ -1,4 +1,4 @@
-// Milestone 8: the backlight.
+// Milestone 9: I2C and the power chip.
 //
 // First the kernel describes the machine it woke up on: which CPU, which
 // privilege level, the timer, the screen U-Boot handed us, and the device
@@ -13,7 +13,8 @@
 // second, and the buttons themselves interrupt (and wake) the CPU.
 //
 // On the info page, VOL+ and VOL- set the backlight, and it switches off by
-// itself after 30 seconds without a button press.
+// itself after 30 seconds without a button press. B shows the power page:
+// the battery and the power chip's outputs, read over I2C.
 
 #include <stdint.h>
 #include "backlight.h"
@@ -23,6 +24,7 @@
 #include "gic.h"
 #include "gpio.h"
 #include "mmu.h"
+#include "rk817.h"
 #include "screen.h"
 #include "speed.h"
 #include "sysreg.h"
@@ -253,6 +255,94 @@ static void unmapped_read(void)
 	__asm__ volatile("ldr %w0, [%1]" : "=r"(value) : "r"(0x40000000UL));
 }
 
+// ---- the power page ---------------------------------------------------------
+
+static void padded(const char *s, uint32_t width)
+{
+	uint32_t n = 0;
+	for (; s[n]; n++)
+		kputc(s[n]);
+	for (; n < width; n++)
+		kputc(' ');
+}
+
+static void millivolts(uint32_t mv)
+{
+	kprintf("%u.%03u V", mv / 1000, mv % 1000);
+}
+
+static void draw_power(void)
+{
+	console_goto(0, 2);
+	uint32_t id;
+	label("Chip");
+	if (rk817_id(&id)) {
+		console_color(YELLOW);
+		kputs("no answer on I2C0 at 0x20\n");
+		return;
+	}
+	kprintf("RK%x, revision %u (I2C0, 0x%x)\n", id >> 4, id & 0xf, RK817_ADDR);
+	kputc('\n');
+
+	struct battery b;
+	if (rk817_battery(&b) == 0) {
+		label("Battery");
+		millivolts(b.mv);
+		console_clear_eol();
+		kputc('\n');
+		label("Current");
+		kprintf("%d mA %s", b.ma, b.ma < 0 ? "out" : "in");
+		console_clear_eol();
+		kputc('\n');
+		label("Charger");
+		if (b.charger_mv) {
+			millivolts(b.charger_mv);
+			kprintf(", %s", rk817_charge_status(b.status));
+		} else {
+			kputs("not plugged in");
+		}
+		console_clear_eol();
+		kputc('\n');
+	}
+	kputc('\n');
+
+	struct rail rails[RK817_RAILS];
+	if (rk817_rails(rails) == 0)
+		for (uint32_t i = 0; i < RK817_RAILS; i++) {
+			console_color(rails[i].on ? WHITE : GREY);
+			padded(rails[i].output, 6);
+			padded(rails[i].name, 14);
+			if (rails[i].mv)
+				millivolts(rails[i].mv);
+			else
+				kputs("       ");
+			kputs(rails[i].on ? "  on \n" : "  off\n");
+		}
+}
+
+// The battery and the power chip's outputs, read over I2C once a second
+static void power_page(void)
+{
+	console_init(WHITE, BG);
+	console_color(YELLOW);
+	kputs("The power chip\n");
+	console_goto(0, 22);
+	kputs("A: button test");
+	timer_start(1);
+	for (;;) {
+		draw_power();
+		uint64_t ticks = timer_ticks;
+		while (timer_ticks == ticks) {   // sleep until the next second
+			wait();
+			if (buttons_pressed() & bit_of("A")) {
+				while (buttons_pressed())
+					wait();
+				return;
+			}
+		}
+	}
+}
+
 static void button_test(void)
 {
 	console_init(WHITE, BG);
@@ -353,7 +443,7 @@ void kmain(uintptr_t device_tree)
 	buttons_irq_init();
 
 	console_color(YELLOW);
-	kputs("A: button test   VOL+/-: brightness\n");
+	kputs("A: buttons  B: power  VOL+/-: light\n");
 	uint32_t row = console_row();
 	label("Running");
 	console_goto(0, row + 1);
@@ -403,7 +493,7 @@ void kmain(uintptr_t device_tree)
 				down = 0;
 			}
 		}
-		if (down & bit_of("A"))
+		if (down & (bit_of("A") | bit_of("B")))
 			break;
 		if (down & (bit_of("VOL+") | bit_of("VOL-"))) {
 			if (down & bit_of("VOL+"))
@@ -442,8 +532,11 @@ void kmain(uintptr_t device_tree)
 		console_goto(8, row + 3);
 		kprintf("%lu.%lu%% of the time   ", awake / 10, awake % 10);
 	}
+	int power = held & bit_of("B");
 	while (buttons_pressed())   // wait for it to be let go
-		;
+		wait();
+	if (power)
+		power_page();
 	button_test();
 }
 

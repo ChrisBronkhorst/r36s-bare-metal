@@ -13,6 +13,7 @@ void console_init(uint32_t fg, uint32_t bg);   // clears the screen
 void console_color(uint32_t fg);
 void console_goto(uint32_t col, uint32_t row);
 uint32_t console_row(void);
+void console_clear_eol(void);   // blank the rest of the current line
 void kputc(char c);
 void kputs(const char *s);   // no newline added
 void kprintf(const char *fmt, ...);   // %s %c %d %u %x %p %%, width like %08x, l for 64-bit

@@ -1,0 +1,28 @@
+#pragma once
+#include <stdint.h>
+
+// The RK817 power chip ("PMIC"): it makes every voltage on the board from the
+// battery, charges the battery, and measures it. It sits on I2C bus 0 at
+// address 0x20. (It's also the console's audio codec.)
+
+#define RK817_ADDR 0x20
+
+int rk817_id(uint32_t *id);   // 0 if it answered; the ID should be 0x817x
+
+struct battery {
+	uint32_t mv;           // battery voltage
+	int32_t ma;            // current: + into the battery (charging), - out
+	uint32_t charger_mv;   // voltage at the charging port, 0 if nothing
+	uint32_t status;       // 0-7, see rk817_charge_status()
+};
+int rk817_battery(struct battery *b);
+const char *rk817_charge_status(uint32_t status);
+
+// The chip's power outputs: 4 DC-DC converters, 9 LDOs, and a 5 V boost
+struct rail {
+	const char *output, *name;   // e.g. "LDO8", "vcc_lcd" (from the device tree)
+	int on;
+	uint32_t mv;                 // 0 if it has no programmable voltage
+};
+#define RK817_RAILS 13
+int rk817_rails(struct rail rails[RK817_RAILS]);

@@ -33,6 +33,12 @@ uint32_t console_row(void)
 	return row;
 }
 
+void console_clear_eol(void)
+{
+	if (col < cols)
+		rect(MARGIN + col * CELL_W, MARGIN + row * CELL_H, (cols - col) * CELL_W, CELL_H, bg);
+}
+
 // Each glyph row is one byte; bit 0 is the leftmost pixel. Every font pixel
 // becomes a 2x2 block on screen.
 static void draw_glyph(char c, uint32_t x, uint32_t y, uint32_t fg, uint32_t bg)
