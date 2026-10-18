@@ -27,7 +27,7 @@ uboot.img: kernel.img pack-loader.py
 kernel.elf: $(OBJS) linker.ld
 	$(LD) -T linker.ld -o $@ $(OBJS)
 
-$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h board.h monitor.h ram.h ../spl/sd.h
+$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h board.h monitor.h ram.h ../spl/sd.h ../ddr/report.h
 
 sd.o: ../spl/sd.c ../spl/sd.h
 	$(CC) $(CFLAGS) -c $< -o $@

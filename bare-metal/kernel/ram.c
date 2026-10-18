@@ -24,6 +24,7 @@
 #include "exception.h"
 #include "ram.h"
 #include "../spl/sd.h"
+#include "../ddr/report.h"
 
 #define PCTL    0xff600000UL
 #define PHY     0xff2a0000UL
@@ -66,9 +67,12 @@ static const char *type_name(uint32_t t)
 
 void ram_page(void)
 {
+	const struct ddr_report *ours = (const struct ddr_report *)DDR_REPORT;
+	if (ours->magic != DDR_MAGIC)
+		ours = 0;
 	console_init(WHITE, BG);
 	console_color(YELLOW);
-	kputs("RAM, as Rockchip's setup left it\n");
+	kputs(ours ? "RAM, as OUR setup left it!\n" : "RAM, as Rockchip's setup left it\n");
 
 	// The summary, decoded like U-Boot's sdram_common.h (channel 0)
 	uint32_t r2 = rd(PMUGRF + 0x208), r3 = rd(PMUGRF + 0x20c);
@@ -129,6 +133,19 @@ void ram_page(void)
 	kprintf("cmd %02x clk %02x dqs %02x odt %02x\n", rd(PHY + 4 * 0x11) & 0xff,
 		rd(PHY + 4 * 0x16) & 0xff, rd(PHY + 4 * 0x20) & 0xff, rd(PHY + 4 * 0x21) & 0xff);
 
+	if (ours) {
+		label("Ours");
+		kprintf("PLL %u us, start %u us, %u %s\n", ours->dpll_lock_us, ours->init_us,
+			ours->training_tries, ours->training_tries == 1 ? "try" : "tries");
+		label("Test");
+		kprintf("%u words ok in %u ms\n", ours->test_words, ours->test_us / 1000);
+		label("ROM left");
+		kprintf("mode %04x %04x APLL %04x\n", ours->cru_mode_in & 0xffff,
+			ours->pmucru_mode_in & 0xffff, ours->apll_con0_in & 0xffff);
+		label("");
+		kprintf("counter %s, took %lu ms\n", ours->stimer_was & 1 ? "on" : "off",
+			(ours->ticks_out - ours->ticks_in) / 24000);
+	}
 	console_goto(0, 22);
 	console_color(YELLOW);
 	kputs("Y: save registers to card  A: buttons");

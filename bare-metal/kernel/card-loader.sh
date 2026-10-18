@@ -1,6 +1,8 @@
 #!/bin/bash
 # Swap what Rockchip's loader starts, on the learning console's card:
 #
+#   ./card-loader.sh ddr      everything ours: RAM setup, SPL, monitor, kernel.
+#                             Only the boot ROM inside the chip is left.
 #   ./card-loader.sh spl      our SPL, monitor and kernel: only the boot ROM and
 #                             Rockchip's RAM setup are left
 #   ./card-loader.sh monitor  our kernel, and our monitor at EL3 (no U-Boot, no ATF)
@@ -19,7 +21,7 @@
 set -e
 cd "$(dirname "$0")"
 what=$1
-case "$what" in spl|monitor|ours|uboot|ramdump) ;; *) echo "usage: $0 spl|monitor|ours|uboot|ramdump"; exit 1 ;; esac
+case "$what" in ddr|spl|monitor|ours|uboot|ramdump) ;; *) echo "usage: $0 ddr|spl|monitor|ours|uboot|ramdump"; exit 1 ;; esac
 
 boot=/Volumes/BOOT
 [ -f "$boot/boot.ini" ] || { echo "No BOOT partition mounted at $boot. Is the card in?"; exit 1; }
@@ -64,11 +66,13 @@ if [ "$what" = ramdump ]; then
 fi
 make uboot.img >/dev/null
 make -C ../monitor trust.img >/dev/null
-make -C ../spl idbloader.img >/dev/null
+make -C ../spl idbloader.img idbloader-ours.img >/dev/null
 mkdir -p backup
 # The boot ROM's slot runs from sector 64 to 2047 (31 x 32 KB): pad ours to that
+idb=../spl/idbloader.img
+[ "$what" = ddr ] && idb=../spl/idbloader-ours.img
 head -c $((31 * 32768)) /dev/zero > "$tmp/idb"
-dd if=../spl/idbloader.img of="$tmp/idb" conv=notrunc 2>/dev/null
+dd if=$idb of="$tmp/idb" conv=notrunc 2>/dev/null
 
 # One slot: its name, offset and size (in 32 KB blocks), our image, the
 # backup of the original, and which of the two it should hold
@@ -95,6 +99,7 @@ U="swap uboot.img 256 128 uboot.img backup/uboot-stock.img"
 T="swap trust.img 384 128 ../monitor/trust.img backup/trust-stock.img"
 I="swap idbloader 1 31 $tmp/idb backup/idb-stock.img"
 case "$what" in
+  ddr)     $U ours;  $T ours;  $I ours ;;
   spl)     $U ours;  $T ours;  $I ours ;;
   monitor) $U ours;  $T ours;  $I stock ;;
   ours)    $U ours;  $T stock; $I stock ;;

@@ -18,6 +18,15 @@ DDR = ../ddr-blob/rk3326-ddr-v1.10.bin
 idbloader.img: spl.bin $(DDR) pack-idb.py
 	python3 -I pack-idb.py $(DDR) spl.bin $@
 
+# The same with our own RAM setup (bare-metal/ddr) as stage 1
+idbloader-ours.img: spl.bin ../ddr/ddr.bin pack-idb.py
+	python3 -I pack-idb.py ../ddr/ddr.bin spl.bin $@
+
+../ddr/ddr.bin: FORCE
+	$(MAKE) -C ../ddr ddr.bin
+
+FORCE:
+
 spl.bin: spl.elf
 	$(LD) -T linker.ld --oformat binary -o $@ $(OBJS)
 	@echo "spl.bin: $$(wc -c < $@ | tr -d ' ') bytes"
@@ -40,6 +49,6 @@ dump: spl.elf
 	objdump -d spl.elf
 
 clean:
-	rm -f *.o spl.elf spl.bin idbloader.img
+	rm -f *.o spl.elf spl.bin idbloader.img idbloader-ours.img
 
-.PHONY: dump clean
+.PHONY: dump clean FORCE

@@ -31,3 +31,7 @@ bare-metal/spl/*.o
 bare-metal/spl/spl.elf
 bare-metal/spl/spl.bin
 bare-metal/spl/idbloader.img
+bare-metal/ddr/*.o
+bare-metal/ddr/ddr.elf
+bare-metal/ddr/ddr.bin
+bare-metal/spl/idbloader-ours.img
