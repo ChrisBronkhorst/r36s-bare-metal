@@ -507,8 +507,8 @@ static void button_test(void)
 }
 
 // Without U-Boot, nothing has set up the screen: we make our own.
-// Before the picture is there, the backlight is our only signal:
-// one flash means the power chip answered.
+// Before the picture is there, the backlight is our only signal: one
+// flash per step (see display_start), steady full light = crashed.
 static void own_screen(void)
 {
 	screen.fb = (volatile uint8_t *)0x3de00000UL;   // where U-Boot put it
@@ -522,12 +522,14 @@ static void own_screen(void)
 
 	if (board_init() != 0)
 		return;   // no power chip: no backlight, no panel. Stay dark.
-	backlight_set(100);
+	backlight_set(100);   // flash 1: the power chip answered
 	uint64_t t = now();
-	while (now() - t < 24000000 / 4)
+	while (now() - t < 24000000 / 1000 * 150)
 		;
 	backlight_set(0);
-	display_start(0);
+	while (now() - t < 24000000 / 1000 * 600)
+		;
+	display_start(0);     // flashes 2-8, one per step, then the picture
 }
 
 // uboot = 1 if U-Boot loaded us, 0 if Rockchip's loader did (start.S)

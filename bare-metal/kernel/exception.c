@@ -2,6 +2,7 @@
 // registers and calls exception(). Interrupts and system calls are handled
 // and return; anything else is a crash, and we show everything we know.
 
+#include "backlight.h"
 #include "buttons.h"
 #include "console.h"
 #include "exception.h"
@@ -120,6 +121,10 @@ static void crash_screen(uint64_t slot, struct regs *r)
 	console_color(YELLOW);
 	kputs("Press any button to restart");
 
+	// Light on, steady and full: if the display isn't working yet, that
+	// still says "crashed" (instead of the dark of a hang)
+	backlight_set(100);
+	buttons_init();   // maybe not done yet
 	while (buttons_pressed())   // let go of whatever caused it first
 		;
 	while (!buttons_pressed())

@@ -287,22 +287,45 @@ static void check(void)
 	log.errors1 = rd(DSI + DSI_INT_ST1);
 }
 
+// Without U-Boot there's no picture until the end, so the backlight
+// reports progress: one flash after each step. N flashes and then dark
+// = stuck in step N + 1. (Flash 1 is the power chip, in main.c.)
+static int flashing;
+
+static void step_done(void)
+{
+	if (!flashing)
+		return;
+	backlight_set(100);
+	delay_ms(150);
+	backlight_set(0);
+	delay_ms(450);
+}
+
 void display_start(int running)
 {
 	uint64_t start = now();
 	uint32_t light = backlight_get();
+	flashing = !running;
 	backlight_set(0);
 	open_gates();
 	shut_down(running);
+	step_done();     // 2: clock gates open, panel off
 	clocks();
+	step_done();     // 3: CPLL and the pixel clock set
 	delay_ms(1);
 	masked(SOFTRST(3), 1U << 4 | 1U << 5 | 1U << 13 | 1U << 14, 0);   // out of reset
 	delay_ms(200);   // let the panel's power drain away completely
+	step_done();     // 4: out of reset
 	dsi_phy_up();
+	step_done();     // 5: DSI host and PHY up
 	panel_up();
+	step_done();     // 6: panel powered, commands sent
 	dsi_mode(1);     // video: the host now takes pixels from the VOP...
+	step_done();     // 7: video mode
 	vop_up();        // ...so only now start sending them. Started earlier,
 	                 // they overflow the host's input (DSI error bit 0x80).
+	step_done();     // 8: VOP running
 	delay_ms(120);
 	backlight_set(light ? light : 50);
 	log.dark_ms = (now() - start) / 24000;
