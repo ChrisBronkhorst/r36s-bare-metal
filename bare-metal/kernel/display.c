@@ -252,7 +252,10 @@ static void check(void)
 {
 	for (uint32_t i = 0; i < sizeof vop_regs / sizeof vop_regs[0]; i++) {
 		uint32_t got = rd(VOP + vop_regs[i][0]);
-		if (got == vop_regs[i][1])
+		// 0x1f0 changes by itself: U-Boot's dump had 0x179, ours read
+		// 0x092, both below the 512 lines of a frame. It looks like the
+		// line being sent right now, so it can't be compared.
+		if (got == vop_regs[i][1] || vop_regs[i][0] == 0x1f0)
 			log.vop_same++;
 		else if (!log.vop_got && !log.vop_reg) {
 			log.vop_reg = vop_regs[i][0];
