@@ -17,6 +17,7 @@
 #include "gpio.h"
 #include "cpufreq.h"
 #include "cores.h"
+#include "gpu.h"
 #include "matmul.h"
 #include "rk817.h"
 #include "thermal.h"
@@ -422,6 +423,16 @@ static void c_cores(void)
 	}
 }
 
+// gpu: power the GPU on and describe it; gpu job: run a first job chain
+static void c_gpu(void)
+{
+	const char *w = words > 1 ? word[1] : "";
+	if (w[0] == 'j')
+		gpu_job_test(say);
+	else
+		gpu_start(say);
+}
+
 static void c_matmul(void)
 {
 	uint64_t n;
@@ -453,6 +464,7 @@ static const struct command {
 	{ "temp",   "",               "the chip's temperature", c_temp },
 	{ "battery", "",              "charge, voltage, current", c_battery },
 	{ "matmul", "[N]",            "time a matrix multiply, plain and NEON", c_matmul },
+	{ "gpu",    "[job]",          "power the GPU on and set it up; job: run a first job", c_gpu },
 	{ "cores",  "",               "start cores 1-3, and hear from each", c_cores },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },
 	{ "echo",   "WORDS",          "say them back", c_say },
