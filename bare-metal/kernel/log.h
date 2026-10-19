@@ -6,4 +6,5 @@
 
 void klog(const char *fmt, ...);   // one line; the newline is added
 void log_start(void);              // send from now on
+void log_flush(void);              // send what's waiting, right now
 void log_lines(uint32_t row);      // counters, for the USB page

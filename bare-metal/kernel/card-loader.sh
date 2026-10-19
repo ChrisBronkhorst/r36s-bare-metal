@@ -108,9 +108,11 @@ PY
   eject_card "$disk" && echo "Ejected."
   exit 0
 fi
-make uboot.img >/dev/null
-make -C ../monitor trust.img >/dev/null
-make -C ../spl idbloader.img idbloader-ours.img >/dev/null
+# Build as the user who ran sudo, so the build files stay theirs
+as_user() { if [ -n "$SUDO_USER" ]; then sudo -u "$SUDO_USER" "$@"; else "$@"; fi; }
+as_user make uboot.img >/dev/null
+as_user make -C ../monitor trust.img >/dev/null
+as_user make -C ../spl idbloader.img idbloader-ours.img >/dev/null
 mkdir -p backup
 # The boot ROM's slot runs from sector 64 to 2047 (31 x 32 KB): pad ours to that
 idb=../spl/idbloader.img

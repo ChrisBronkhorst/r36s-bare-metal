@@ -240,6 +240,8 @@ static void loader(const uint8_t *f, uint32_t ihl, uint32_t total)
 	usb_send(out, 14 + 20 + 8 + reply);
 	if (go) {
 		usb_drain(100000);   // the Mac has our "ok" before we vanish
+		log_flush();         // and our last words
+		usb_drain(100000);
 		loader_start_new();
 	}
 }

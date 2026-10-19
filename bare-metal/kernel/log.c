@@ -87,6 +87,15 @@ void klog(const char *fmt, ...)
 	restore_irqs(daif);
 }
 
+// Send what's waiting now, even from inside the USB code (when it's about
+// to stop and there's no "later")
+void log_flush(void)
+{
+	uint64_t daif = mask_irqs();
+	flush();
+	restore_irqs(daif);
+}
+
 void log_start(void)
 {
 	started = 1;
