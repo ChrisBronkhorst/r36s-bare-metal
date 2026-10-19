@@ -34,5 +34,10 @@ int rk817_rail_enable(uint32_t rail, int on);
 #define RAIL_VCC_BACKLIGHT 10   // LDO7
 #define RAIL_VCC_LCD 11         // LDO8, the panel's power
 
+// DC-DC converter n's (1-4) voltage. Setting: only 2 (vdd_arm, the CPU's),
+// 900-1350 mV.
+int rk817_buck_mv(uint32_t buck, uint32_t *mv);
+int rk817_buck_set_mv(uint32_t buck, uint32_t mv);
+
 // Set LDO n's (1-9) voltage: 0.6 to 3.4 V in 25 mV steps
 int rk817_ldo_set_mv(uint32_t ldo, uint32_t mv);

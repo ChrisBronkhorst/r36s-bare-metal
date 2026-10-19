@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "console.h"
 #include "gpio.h"
+#include "cpufreq.h"
 #include "dump.h"
 #include "exception.h"
 #include "log.h"
@@ -306,6 +307,55 @@ static void c_smc(void)
 	say("x0 %lx  x1 %lx  x2 %lx  x3 %lx\n", x0, x1, x2, x3);
 }
 
+// mhz [MHZ]: show, or set, the CPU's speed (and its voltage with it)
+static void c_mhz(void)
+{
+	uint64_t want;
+	if (words > 1) {
+		if (!arg(1, 0, &want))
+			return;
+		uint32_t was = cpu_mhz();
+		const char *err = cpu_set_mhz((uint32_t)want);
+		if (err) {
+			say("%s. Speeds:\n", err);
+			cpu_speeds(say);
+			return;
+		}
+		klog("cpu: %u -> %u MHz", was, cpu_mhz());
+	}
+	say("CPU %u MHz (PLL), %u measured, vdd_arm %u mV\n", cpu_mhz(), cpu_measure_mhz(), cpu_mv());
+}
+
+// stress [MS]: the same work again and again (mixing numbers, writing and
+// reading 256 KB of RAM), for MS milliseconds; every result must match the
+// first. An under-volted CPU gets the odd wrong answer rather than crashing,
+// so this is how to tell. (Up to 2 s: the Mac stops waiting for an answer
+// after 3.)
+static uint32_t stress_buf[64 * 1024];
+static void c_stress(void)
+{
+	uint64_t ms;
+	if (!arg(1, 1000, &ms))
+		return;
+	if (ms > 2000)
+		ms = 2000;
+	uint64_t end = READ_SYSREG(cntpct_el0) + ms * 24000, first = 0, rounds = 0, wrong = 0;
+	while (READ_SYSREG(cntpct_el0) < end) {
+		uint64_t h = 0x9e3779b97f4a7c15ULL;
+		for (uint32_t i = 0; i < 64 * 1024; i++) {
+			h ^= h << 13, h ^= h >> 7, h ^= h << 17;   // xorshift: lots of ALU work
+			stress_buf[i] = (uint32_t)h;
+		}
+		for (uint32_t i = 0; i < 64 * 1024; i++)
+			h = h * 31 + stress_buf[i];
+		if (!rounds++)
+			first = h;
+		else if (h != first)
+			wrong++;
+	}
+	say("%lu rounds in %lu ms at %u MHz: %lu wrong\n", rounds, ms, cpu_mhz(), wrong);
+}
+
 static void c_say(void)
 {
 	for (uint32_t i = 1; i < words; i++)
@@ -325,6 +375,8 @@ static const struct command {
 	{ "clocks", "",               "the PLLs", c_clocks },
 	{ "uptime", "",               "time since power-on", c_uptime },
 	{ "irqs",   "",               "interrupt counts", c_irqs },
+	{ "mhz",    "[MHZ]",          "the CPU's speed: show, or set", c_mhz },
+	{ "stress", "[MS]",           "check the CPU gets the same answers", c_stress },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },
 	{ "echo",   "WORDS",          "say them back", c_say },
 };

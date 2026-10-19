@@ -1,5 +1,5 @@
 // Register map from Linux's rk808.h, rk808-regulator.c and rk817_charger.c.
-// Read-only so far: writing here changes real voltages (vdd_arm is the CPU's).
+// Careful: writing here changes real voltages (vdd_arm is the CPU's).
 
 #include "i2c.h"
 #include "rk817.h"
@@ -93,6 +93,28 @@ int rk817_ldo_set_mv(uint32_t ldo, uint32_t mv)
 		return -1;
 	uint8_t sel = (uint8_t)((mv - 600) / 25);
 	return i2c_write(I2C0, RK817_ADDR, LDO_VSEL(ldo - 1), &sel, 1);
+}
+
+// DC-DC converters: 0.5 V + 12.5 mV steps up to 1.5 V (then 100 mV steps,
+// which we don't need). Bit 7 of the register isn't the voltage: kept.
+int rk817_buck_mv(uint32_t buck, uint32_t *mv)
+{
+	uint8_t v;
+	if (buck < 1 || buck > 4 || read(BUCK_VSEL(buck - 1), &v, 1))
+		return -1;
+	uint32_t sel = v & 0x7f;
+	*mv = sel <= 80 ? 500 + sel * 25 / 2 : 1600 + (sel - 81) * 100;
+	return 0;
+}
+
+int rk817_buck_set_mv(uint32_t buck, uint32_t mv)
+{
+	uint8_t v;
+	// Only 2 (vdd_arm) for now, and only within what the CPU is rated for
+	if (buck != 2 || mv < 900 || mv > 1350 || read(BUCK_VSEL(buck - 1), &v, 1))
+		return -1;
+	v = (uint8_t)((v & 0x80) | (mv - 500) * 2 / 25);
+	return i2c_write(I2C0, RK817_ADDR, BUCK_VSEL(buck - 1), &v, 1);
 }
 
 int rk817_rails(struct rail rails[RK817_RAILS])

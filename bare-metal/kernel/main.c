@@ -36,6 +36,7 @@
 #include "log.h"
 #include "loader.h"
 #include "rk817.h"
+#include "cpufreq.h"
 #include "scan.h"
 #include "screen.h"
 #include "speed.h"
@@ -616,6 +617,14 @@ static void own_screen_start(void)
 {
 	if (board_init() != 0)
 		return;   // no power chip: no backlight, no panel. Stay dark.
+	// Full speed (we start at 400 MHz), now the power chip can raise the
+	// CPU's voltage to match. Before the display: it starts faster too.
+	uint32_t was = cpu_mhz();
+	const char *err = cpu_set_mhz(1296);
+	if (err)
+		klog("cpu: stays at %u MHz: %s", was, err);
+	else
+		klog("cpu: %u -> %u MHz, vdd_arm %u mV", was, cpu_mhz(), cpu_mv());
 #ifdef FLASHES
 	backlight_set(100);   // flash 1: the power chip answered
 	uint64_t t = now();
