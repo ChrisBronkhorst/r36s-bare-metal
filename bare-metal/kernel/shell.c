@@ -16,6 +16,7 @@
 #include "console.h"
 #include "gpio.h"
 #include "cpufreq.h"
+#include "cores.h"
 #include "matmul.h"
 #include "rk817.h"
 #include "thermal.h"
@@ -391,6 +392,36 @@ static void c_battery(void)
 	    b.ma < 0 ? "out" : "in", b.plugged_in ? rk817_charge_status(b.status) : "not plugged in");
 }
 
+// cores: start cores 1-3, and have each say who it is and how fast it runs
+static struct who { uint64_t mpidr, el, mhz; } who[4];
+static void who_job(void *p)
+{
+	struct who *w = p;
+	w->mpidr = READ_SYSREG(mpidr_el1);
+	w->el = current_el();
+	w->mhz = cpu_measure_mhz();
+}
+static void c_cores(void)
+{
+	const char *err = cores_start();
+	if (err)
+		return say("%s\n", err);
+	uint64_t t[4] = {0};
+	who_job(&who[0]);
+	for (uint32_t c = 1; c < 4; c++) {
+		uint64_t t0 = READ_SYSREG(cntpct_el0);
+		core_run(c, who_job, &who[c]);
+		core_wait(c);
+		t[c] = READ_SYSREG(cntpct_el0) - t0;
+	}
+	for (uint32_t c = 0; c < 4; c++) {
+		say("core %u: MPIDR %08lx, EL%lu, %lu MHz measured", c, who[c].mpidr, who[c].el, who[c].mhz);
+		if (c)
+			say(", %lu jobs, this one %lu us there and back", core_jobs(c), t[c] / 24);
+		say(c ? "\n" : " (interrupts on: the one doing this)\n");
+	}
+}
+
 static void c_matmul(void)
 {
 	uint64_t n;
@@ -422,6 +453,7 @@ static const struct command {
 	{ "temp",   "",               "the chip's temperature", c_temp },
 	{ "battery", "",              "charge, voltage, current", c_battery },
 	{ "matmul", "[N]",            "time a matrix multiply, plain and NEON", c_matmul },
+	{ "cores",  "",               "start cores 1-3, and hear from each", c_cores },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },
 	{ "echo",   "WORDS",          "say them back", c_say },
 };

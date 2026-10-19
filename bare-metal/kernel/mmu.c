@@ -87,5 +87,16 @@ int mmu_init(uintptr_t framebuffer, uint32_t size)
 	sctlr |= SCTLR_M | SCTLR_C | SCTLR_I;
 	sctlr &= ~SCTLR_A;
 	__asm__ volatile("msr sctlr_el2, %0\nisb" : : "r"(sctlr) : "memory");
+	mmu_regs.mair = MAIR, mmu_regs.tcr = tcr, mmu_regs.ttbr = (uintptr_t)level1;
+	mmu_regs.sctlr = sctlr;
 	return 1;
+}
+
+struct mmu_regs mmu_regs __attribute__((aligned(64)));   // one cache line
+
+// A core with its caches off reads RAM directly, but our copy of
+// mmu_regs may still be only in our cache: "clean" it (write it to RAM)
+void mmu_publish(void)
+{
+	__asm__ volatile("dc cvac, %0\ndsb sy" : : "r"(&mmu_regs) : "memory");
 }

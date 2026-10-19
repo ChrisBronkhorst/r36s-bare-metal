@@ -12,6 +12,7 @@
 
 #include <arm_neon.h>
 #include <stdint.h>
+#include "cores.h"
 #include "matmul.h"
 #include "sysreg.h"
 
@@ -75,9 +76,9 @@ static void auto_ikj(uint32_t n)
 // loop and is written to memory once at the end. For each k: 2 loads of B
 // (8 floats), 4 of A (one float each), 8 vector multiply-adds = 32
 // multiply-adds. Version 3 must load and store C for every 4 multiply-adds.
-static void neon_4x8(uint32_t n)
+static void neon_rows(uint32_t n, uint32_t first, uint32_t end)
 {
-	for (uint32_t i = 0; i < n; i += 4)
+	for (uint32_t i = first; i < end; i += 4)
 		for (uint32_t j = 0; j < n; j += 8) {
 			float32x4_t c00 = vdupq_n_f32(0), c01 = c00, c10 = c00, c11 = c00;
 			float32x4_t c20 = c00, c21 = c00, c30 = c00, c31 = c00;
@@ -96,6 +97,50 @@ static void neon_4x8(uint32_t n)
 			vst1q_f32(c + 2 * n, c20), vst1q_f32(c + 2 * n + 4, c21);
 			vst1q_f32(c + 3 * n, c30), vst1q_f32(c + 3 * n + 4, c31);
 		}
+}
+
+static void neon_4x8(uint32_t n) { neon_rows(n, 0, n); }
+
+// 5. All of it on core 1, which nothing ever interrupts. (The time includes
+// waking it up and hearing back: about a microsecond.)
+static void neon_job(void *n) { neon_4x8(*(uint32_t *)n); }
+static void neon_core1(uint32_t n)
+{
+	static uint32_t arg;
+	arg = n;
+	if (!core_alive(1))
+		return neon_4x8(n);
+	core_run(1, neon_job, &arg);
+	core_wait(1);
+}
+
+// 6. Four cores, a quarter of C's rows each (in blocks of 4 rows). Each
+// core writes only its own rows, so they never write the same memory.
+struct part { uint32_t n, first, end; };
+static void part_job(void *p)
+{
+	struct part *q = p;
+	neon_rows(q->n, q->first, q->end);
+}
+static void neon_4cores(uint32_t n)
+{
+	static struct part parts[4];
+	uint32_t blocks = n / 4, row = 0;
+	for (uint32_t c = 0; c < 4; c++) {
+		uint32_t rows = (blocks / 4 + (c < blocks % 4)) * 4;
+		parts[c] = (struct part){ n, row, row + rows };
+		row += rows;
+	}
+	for (uint32_t c = 1; c < 4; c++)
+		if (core_alive(c))
+			core_run(c, part_job, &parts[c]);
+	part_job(&parts[0]);
+	for (uint32_t c = 1; c < 4; c++) {
+		if (core_alive(c))
+			core_wait(c);
+		else
+			part_job(&parts[c]);   // no such core: do it ourselves
+	}
 }
 
 static uint64_t ticks(void) { return READ_SYSREG(cntpct_el0); }
@@ -157,13 +202,18 @@ void matmul_bench(uint32_t n, void (*say)(const char *fmt, ...))
 		{ "plain i-k-j  ", plain_ikj },
 		{ "compiler NEON", auto_ikj },
 		{ "hand NEON 4x8", neon_4x8 },
+		{ "  on core 1  ", neon_core1 },
+		{ "  on 4 cores ", neon_4cores },
 	};
+	const char *err = cores_start();
+	if (err)
+		say("(other cores: %s; their rows run on core 0)\n", err);
 	uint64_t mads = (uint64_t)n * n * n;   // multiply-adds
 	say("%ux%u: %lu multiply-adds, %u KB of data\n", n, n, mads, 3 * n * n * 4 / 1024);
 	say("              ms     GFLOPS  flops/cycle  speed-up  error\n");
 	uint64_t first = 0;
-	static uint64_t times[4][RUNS];
-	static uint32_t runs[4];
+	static uint64_t times[6][RUNS];
+	static uint32_t runs[6];
 	for (uint32_t v = 0; v < sizeof versions / sizeof versions[0]; v++) {
 		// Run it again and again (at least 5 times, up to 50 or about
 		// 0.3 s), keeping every time. The first run also pays for filling

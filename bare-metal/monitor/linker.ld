@@ -16,6 +16,7 @@ SECTIONS
 	. = ALIGN(16);
 	__bss_end = .;
 
-	. = . + 0x2000;		/* 8 KB stack */
+	. = . + 0x2000;		/* 8 KB stack, for core 0 */
 	__stack_top = .;
+	. = . + 0x3000;		/* 4 KB each for cores 1-3, above it */
 }

@@ -56,6 +56,37 @@ _start:
 park:	wfe
 	b	park
 
+// A core started by PSCI CPU_ON (main.c): it comes from reset, through the
+// jump in the PMU's SRAM. EL3, caches off, everything still to set up.
+// Each core gets its own 4 KB stack above core 0's.
+.global secondary_start
+secondary_start:
+	adr	x0, vectors
+	msr	vbar_el3, x0
+	ldr	x0, =0x30c51830
+	msr	sctlr_el3, x0
+	msr	cptr_el3, xzr
+	isb
+	msr	spsel, #1
+	mrs	x19, mpidr_el1
+	and	x19, x19, #3		// which core
+	adr	x0, __stack_top
+	add	x0, x0, x19, lsl #12
+	mov	sp, x0
+	mov	x0, x19
+	bl	secondary_main		// returns where to go
+	adr	x1, core_arg
+	ldr	x1, [x1, x19, lsl #3]	// its x0
+	mov	x2, #0x3c9		// EL2, interrupts masked
+	msr	spsr_el3, x2
+	msr	elr_el3, x0
+	mov	x0, x1
+	mov	x1, #0
+	mov	x2, #0
+	mov	x3, #0
+	isb
+	eret
+
 // Drop to EL2 at x0. Called at the end of start-up, and after a crash here.
 //   SPSR_EL3 = 0x3c9: go to EL2, using SP_EL2, with D, A, I and F masked
 //   ELR_EL3  = where to go

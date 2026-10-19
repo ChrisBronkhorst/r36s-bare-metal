@@ -83,3 +83,34 @@ real_start:
 
 park:	wfe				// sleep until an event, forever
 	b	park
+
+// Cores 1-3, started by the monitor (cores.c asks it): EL2, MMU and caches
+// off, interrupts masked, x0 = which core. Caches on first, with core 0's
+// settings: until then this core reads RAM directly and must not write
+// anything, or core 0's cache could later overwrite it (or it could read
+// something core 0 has changed but not yet written out).
+.global secondary_entry
+secondary_entry:
+	mov	x19, x0
+	adrp	x1, mmu_regs
+	add	x1, x1, :lo12:mmu_regs
+	ldp	x2, x3, [x1]		// MAIR, TCR
+	ldp	x4, x5, [x1, #16]	// TTBR, SCTLR
+	msr	mair_el2, x2
+	msr	tcr_el2, x3
+	msr	ttbr0_el2, x4
+	isb
+	tlbi	alle2
+	dsb	sy
+	ic	iallu
+	dsb	sy
+	isb
+	msr	sctlr_el2, x5		// MMU and caches on
+	isb
+	adrp	x1, core_stacks		// this core's 16 KB: core_stacks[core - 1]
+	add	x1, x1, :lo12:core_stacks
+	add	x1, x1, x19, lsl #14	// its top
+	mov	sp, x1
+	mov	x0, x19
+	bl	core_main		// never returns
+	b	park
