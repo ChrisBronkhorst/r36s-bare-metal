@@ -322,7 +322,9 @@ static void notify_kick(void)
 	const uint8_t *msg = notify_queue & 1 ? connected : speed;
 	uint32_t len = notify_queue & 1 ? 8 : 16;
 	notify_queue &= notify_queue & 1 ? ~1U : ~2U;
-	w(DIEPTSIZ(EP_NOTIFY), 1U << 19 | len);
+	// Bits 29-30, "multi count": packets per microframe. 0 is invalid on
+	// every IN endpoint but endpoint 0; the Mac's reads failed until it was 1
+	w(DIEPTSIZ(EP_NOTIFY), 1U << 29 | 1U << 19 | len);
 	w(DIEPCTL(EP_NOTIFY), r(DIEPCTL(EP_NOTIFY)) | EP_ENA | EP_CNAK);
 	fifo_write(EP_NOTIFY, msg, len);
 	notify_busy = 1;
@@ -722,7 +724,7 @@ void usb_page(void)
 	label("Requests");
 	kprintf("%u, %u refused   \n", st.setups, st.stalls);
 	label("");
-	kprintf("%u desc %u alt %u clear %u CDC  \n", st.descs, st.set_ifaces, st.clears, st.classes);
+	kprintf("desc %u alt %u clr %u cdc %u \n", st.descs, st.set_ifaces, st.clears, st.classes);
 	label("Notified");
 	kprintf("%u sent, %u taken   \n", st.notifies, st.notified);
 	label("Last");
