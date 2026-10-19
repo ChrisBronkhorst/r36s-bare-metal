@@ -24,6 +24,7 @@ bare-metal/ddr-blob/ghidra/
 # A clone of Rockchip's U-Boot, for reading only (it's its own git repo)
 bare-metal/ddr-blob/u-boot-src/
 
+.lsp
 .DS_Store
 ._*
 __pycache__/
