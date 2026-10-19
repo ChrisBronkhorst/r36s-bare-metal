@@ -133,8 +133,8 @@ static void crash_screen(uint64_t slot, struct regs *r)
 }
 
 // Who handles which interrupt. The RK3326 uses numbers up to about 160.
-#define MAX_IRQ 192
 static void (*handlers[MAX_IRQ])(uint32_t id);
+uint64_t irq_counts[MAX_IRQ];
 
 void irq_register(uint32_t id, void (*handler)(uint32_t id), uint8_t priority)
 {
@@ -151,8 +151,11 @@ static void irq(void)
 	if (id == GIC_SPURIOUS)   // it went away before we asked
 		return;
 	irq_current = id;
-	if (id < MAX_IRQ && handlers[id])
-		handlers[id](id);
+	if (id < MAX_IRQ) {
+		irq_counts[id]++;
+		if (handlers[id])
+			handlers[id](id);
+	}
 	irq_current = GIC_SPURIOUS;
 	gic_done(id);
 }
@@ -182,10 +185,7 @@ void exception(uint64_t slot, struct regs *r)
 			fault_far = EL_REG(far);
 			fault_elr = elr;
 		}
-		if (current_el() == 2)
-			__asm__ volatile("msr elr_el2, %0" : : "r"(elr + 4));
-		else
-			__asm__ volatile("msr elr_el1, %0" : : "r"(elr + 4));
+		r->elr = elr + 4;   // skip it: vectors.S returns to r->elr
 		return;
 	}
 	crash_screen(slot, r);

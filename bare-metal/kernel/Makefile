@@ -4,6 +4,7 @@
 #                 card, and start it
 #   make try      the same, but RAM only: the card keeps its kernel
 #   make reboot   restart the console (it starts from the card)
+#   make shell    type commands to the running console (./shell.py CMD: one)
 #   make dump     show the disassembly
 #   make clean
 
@@ -19,7 +20,7 @@ CFLAGS = $(if $(FLASHES),-DFLASHES) $(if $(SPEEDTEST),-DSPEEDTEST) -O2 -Wall -We
 	-mgeneral-regs-only -mstrict-align -fno-stack-protector \
 	-fno-asynchronous-unwind-tables
 
-OBJS = start.o vectors.o main.o screen.o console.o font.o gpio.o buttons.o exception.o mmu.o speed.o gic.o timer.o backlight.o i2c.o rk817.o dump.o scan.o display.o board.o monitor.o ram.o rom.o usb.o net.o log.o loader.o chain.o sd.o
+OBJS = start.o vectors.o main.o screen.o console.o font.o gpio.o buttons.o exception.o mmu.o speed.o gic.o timer.o backlight.o i2c.o rk817.o dump.o scan.o display.o board.o monitor.o ram.o rom.o usb.o net.o log.o loader.o chain.o shell.o sd.o
 
 kernel.img: kernel.elf
 	$(LD) -T linker.ld --oformat binary -o $@ $(OBJS)
@@ -33,7 +34,7 @@ uboot.img: kernel.img pack-loader.py
 kernel.elf: $(OBJS) linker.ld
 	$(LD) -T linker.ld -o $@ $(OBJS)
 
-$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h board.h monitor.h ram.h rom.h usb.h net.h log.h loader.h ../spl/sd.h ../ddr/report.h ../spl/report.h
+$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h board.h monitor.h ram.h rom.h usb.h net.h log.h loader.h shell.h ../spl/sd.h ../ddr/report.h ../spl/report.h
 
 sd.o: ../spl/sd.c ../spl/sd.h
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -53,10 +54,13 @@ try: kernel.img
 reboot:
 	python3 -I push.py --reboot
 
+shell:
+	python3 -I shell.py
+
 dump: kernel.elf
 	objdump -d kernel.elf
 
 clean:
 	rm -f *.o kernel.elf kernel.img uboot.img
 
-.PHONY: push try reboot dump clean
+.PHONY: push try reboot shell dump clean

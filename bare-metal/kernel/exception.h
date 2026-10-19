@@ -5,6 +5,7 @@
 struct regs {
 	uint64_t x[31];   // x0-x30 (x30 is the return address of the current call)
 	uint64_t sp;
+	uint64_t elr, spsr;   // where to return to, and the status to return with
 };
 
 void vectors_install(void);   // vectors.S: point VBAR at our table
@@ -14,7 +15,9 @@ void exception(uint64_t slot, struct regs *r);
 
 // Run handler(id) whenever interrupt `id` arrives (and enable it in the GIC).
 void irq_register(uint32_t id, void (*handler)(uint32_t id), uint8_t priority);
-extern volatile uint32_t irq_current;   // the interrupt being handled, or 1023
+extern volatile uint32_t irq_current;
+#define MAX_IRQ 192
+extern uint64_t irq_counts[MAX_IRQ];   // how many times each has come   // the interrupt being handled, or 1023
 
 // Reset the whole board, through ARM Trusted Firmware. Doesn't return.
 void restart(void);

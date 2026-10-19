@@ -70,6 +70,10 @@ uint32_t dpll_khz(void)
 	return pll_khz(CRU + 0x20, rd(CRU + 0xa0) >> 4 & 3);
 }
 
+uint32_t apll_khz(void) { return pll_khz(CRU + 0x00, rd(CRU + 0xa0) & 3); }
+uint32_t cpll_khz(void) { return pll_khz(CRU + 0x40, rd(CRU + 0xa0) >> 2 & 3); }
+uint32_t npll_khz(void) { return pll_khz(CRU + 0x60, rd(CRU + 0xa0) >> 6 & 3); }
+
 uint32_t gpll_khz(void)
 {
 	return pll_khz(PMUCRU + 0x00, rd(PMUCRU + 0x20) & 3);

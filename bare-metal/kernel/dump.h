@@ -8,4 +8,7 @@
 #define DUMP_PAGES 6
 void dump_page(uint32_t page);   // 0 is the summary, then raw registers
 uint32_t gpll_khz(void);         // the "general" PLL, which feeds many clocks
-uint32_t dpll_khz(void);         // the RAM's PLL (twice the RAM clock)
+uint32_t dpll_khz(void);
+uint32_t apll_khz(void);         // the CPU's
+uint32_t cpll_khz(void);
+uint32_t npll_khz(void);         // the RAM's PLL (twice the RAM clock)

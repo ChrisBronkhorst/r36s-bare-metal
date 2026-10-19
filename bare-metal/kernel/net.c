@@ -16,6 +16,7 @@
 #include "console.h"
 #include "log.h"
 #include "loader.h"
+#include "shell.h"
 #include "net.h"
 #include "usb.h"
 
@@ -217,6 +218,52 @@ int net_udp(uint32_t port, const void *data, uint32_t len)
 	return usb_send(out, 14 + 20 + 8 + len);
 }
 
+// ---- answering whoever sent us a UDP packet ----------------------------------
+// Back to the sender's addresses, from our port to theirs: `head` bytes
+// (up to 16) then `len` bytes of `data`
+static int udp_reply(const uint8_t *f, uint32_t ihl, const void *head, uint32_t head_len,
+		     const void *data, uint32_t len)
+{
+	const uint8_t *u = f + 14 + ihl;
+	uint32_t n = head_len + len;
+	ethernet(f + 6, 0x0800);
+	ipv4(f + 14 + 12, 17, 8 + n);
+	uint8_t *ru = out + 14 + 20;
+	put16(ru, get16(u + 2));   // our port: the one they sent to
+	put16(ru + 2, get16(u));
+	put16(ru + 4, 8 + n);
+	put16(ru + 6, 0);          // no checksum (allowed for UDP over IPv4)
+	for (uint32_t i = 0; i < head_len; i++)
+		ru[8 + i] = ((const uint8_t *)head)[i];
+	for (uint32_t i = 0; i < len; i++)
+		ru[8 + head_len + i] = ((const uint8_t *)data)[i];
+	return usb_send(out, 14 + 20 + 8 + n);
+}
+
+// ---- the shell: a command from the Mac, the answer in pieces ---------------
+#define SHELL_PIECE 1400
+static void shell(const uint8_t *f, uint32_t ihl, uint32_t total)
+{
+	const uint8_t *u = f + 14 + ihl;
+	uint32_t n = get16(u + 4);
+	if (n < 8 || n > total - ihl)
+		return;
+	const char *text;
+	uint32_t len = shell_packet(u + 8, n - 8, &text);
+	// Header for each piece: the command's number, piece number, "last"
+	uint8_t head[7];
+	for (int i = 0; i < 4; i++)
+		head[i] = u[8 + i];
+	uint32_t part = 0, at = 0;
+	do {
+		uint32_t piece = len - at < SHELL_PIECE ? len - at : SHELL_PIECE;
+		head[4] = (uint8_t)part, head[5] = (uint8_t)(part >> 8);
+		head[6] = at + piece == len;
+		udp_reply(f, ihl, head, 7, text + at, piece);
+		at += piece, part++;
+	} while (at < len);
+}
+
 // ---- the loader: a new kernel from the Mac ------------------------------------
 static void loader(const uint8_t *f, uint32_t ihl, uint32_t total)
 {
@@ -225,19 +272,11 @@ static void loader(const uint8_t *f, uint32_t ihl, uint32_t total)
 	if (n < 8 || n > total - ihl)
 		return;
 	int go;
-	uint8_t *r = out + 14 + 20 + 8;
+	uint8_t r[16];
 	uint32_t reply = loader_packet(u + 8, n - 8, r, &go);
 	if (!reply)
 		return;
-	// Back to whoever sent it, from our port to theirs
-	ethernet(f + 6, 0x0800);
-	ipv4(f + 14 + 12, 17, 8 + reply);
-	uint8_t *ru = out + 14 + 20;
-	put16(ru, LOADER_PORT);
-	put16(ru + 2, get16(u));
-	put16(ru + 4, 8 + reply);
-	put16(ru + 6, 0);
-	usb_send(out, 14 + 20 + 8 + reply);
+	udp_reply(f, ihl, r, reply, 0, 0);
 	if (go) {
 		usb_drain(100000);   // the Mac has our "ok" before we vanish
 		log_flush();         // and our last words
@@ -269,6 +308,9 @@ static void frame_in(const uint8_t *f, uint32_t len)
 	else if (protocol == 17 && same(f + 30, our_ip, 4) && total >= ihl + 8 &&
 		 get16(f + 14 + ihl + 2) == LOADER_PORT)
 		loader(f, ihl, total);
+	else if (protocol == 17 && same(f + 30, our_ip, 4) && total >= ihl + 8 &&
+		 get16(f + 14 + ihl + 2) == SHELL_PORT)
+		shell(f, ihl, total);
 	else if (protocol == 17)
 		dhcp(f, len, ihl);
 	else

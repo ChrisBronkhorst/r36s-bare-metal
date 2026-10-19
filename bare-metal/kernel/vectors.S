@@ -13,8 +13,12 @@
 // Each slot is 128 bytes of code. Ours all do the same thing: save the
 // registers, and call exception(slot number, saved registers) in C.
 // If that returns, put the registers back and `eret` to where we were.
+//
+// ELR and SPSR are saved too. An exception inside an exception (a bad
+// address survived inside an interrupt handler, say) overwrites them, and
+// then the outer one would "return" to the inner one's place instead.
 
-#define FRAME 256	// x0-x30 and sp, 8 bytes each
+#define FRAME 272	// x0-x30, sp, ELR and SPSR, 8 bytes each
 
 	.text
 	.balign	0x800		// the table's address must be a multiple of 2 KB
@@ -45,11 +49,29 @@ exception_entry:
 	stp	x28, x29, [sp, #224]
 	add	x1, sp, #FRAME		// sp as it was before the exception
 	stp	x30, x1, [sp, #240]
+	mrs	x1, CurrentEL		// ELR and SPSR: the EL2 or EL1 ones
+	cmp	x1, #(2 << 2)
+	b.ne	1f
+	mrs	x2, elr_el2
+	mrs	x3, spsr_el2
+	b	2f
+1:	mrs	x2, elr_el1
+	mrs	x3, spsr_el1
+2:	stp	x2, x3, [sp, #256]
 
 	mov	x1, sp			// x0 = slot, x1 = the saved registers
 	bl	exception
 
-	ldp	x2, x3, [sp, #16]
+	ldp	x2, x3, [sp, #256]	// as saved (exception() may have moved ELR on,
+	mrs	x1, CurrentEL		// past a faulting instruction)
+	cmp	x1, #(2 << 2)
+	b.ne	3f
+	msr	elr_el2, x2
+	msr	spsr_el2, x3
+	b	4f
+3:	msr	elr_el1, x2
+	msr	spsr_el1, x3
+4:	ldp	x2, x3, [sp, #16]
 	ldp	x4, x5, [sp, #32]
 	ldp	x6, x7, [sp, #48]
 	ldp	x8, x9, [sp, #64]
