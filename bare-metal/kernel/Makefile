@@ -22,7 +22,7 @@ CFLAGS = $(if $(FLASHES),-DFLASHES) $(if $(SPEEDTEST),-DSPEEDTEST) -O2 -Wall -We
 	-mgeneral-regs-only -mstrict-align -fno-stack-protector \
 	-fno-asynchronous-unwind-tables
 
-OBJS = start.o vectors.o main.o screen.o console.o font.o gpio.o buttons.o exception.o mmu.o speed.o gic.o timer.o backlight.o i2c.o rk817.o dump.o scan.o display.o board.o monitor.o ram.o rom.o usb.o net.o log.o loader.o chain.o shell.o cpufreq.o thermal.o matmul.o cores.o gpu.o render.o sd.o
+OBJS = start.o vectors.o main.o screen.o console.o font.o gpio.o buttons.o exception.o mmu.o speed.o gic.o timer.o backlight.o i2c.o rk817.o dump.o scan.o display.o board.o monitor.o ram.o rom.o usb.o net.o log.o loader.o chain.o shell.o cpufreq.o thermal.o matmul.o cores.o gpu.o render.o joystick.o sd.o
 
 kernel.img: kernel.elf
 	$(LD) -T linker.ld --oformat binary -o $@ $(OBJS)
@@ -36,7 +36,7 @@ uboot.img: kernel.img pack-loader.py
 kernel.elf: $(OBJS) linker.ld
 	$(LD) -T linker.ld -o $@ $(OBJS)
 
-$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h board.h monitor.h ram.h rom.h usb.h net.h log.h loader.h shell.h cpufreq.h thermal.h matmul.h cores.h gpu.h shaders.h render.h ../spl/sd.h ../ddr/report.h ../spl/report.h
+$(OBJS): screen.h console.h gpio.h buttons.h exception.h sysreg.h mmu.h speed.h gic.h timer.h backlight.h i2c.h rk817.h dump.h scan.h display.h display_tables.h board.h monitor.h ram.h rom.h usb.h net.h log.h loader.h shell.h cpufreq.h thermal.h matmul.h cores.h gpu.h shaders.h render.h joystick.h ../spl/sd.h ../ddr/report.h ../spl/report.h
 
 sd.o: ../spl/sd.c ../spl/sd.h
 	$(CC) $(CFLAGS) -c $< -o $@

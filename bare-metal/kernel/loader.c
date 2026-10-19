@@ -28,6 +28,7 @@
 #include "gic.h"
 #include "loader.h"
 #include "render.h"
+#include "cores.h"
 #include "log.h"
 #include "../spl/sd.h"
 #include "usb.h"
@@ -276,6 +277,7 @@ uint32_t loader_packet(const uint8_t *data, uint32_t len, uint8_t *reply, int *g
 void loader_start_new(int go)
 {
 	render_stop();   // core 3 off our code, and the console's picture back on screen
+	cores_stop();    // and all of them into the monitor, out of the way
 	usb_stop();
 	if (go == 2)
 		restart();

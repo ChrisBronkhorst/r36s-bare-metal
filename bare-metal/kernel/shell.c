@@ -19,6 +19,7 @@
 #include "cores.h"
 #include "gpu.h"
 #include "render.h"
+#include "joystick.h"
 #include "matmul.h"
 #include "rk817.h"
 #include "thermal.h"
@@ -410,13 +411,20 @@ static void c_cores(void)
 		return say("%s\n", err);
 	uint64_t t[4] = {0};
 	who_job(&who[0]);
+	int busy[4] = { 0 };
 	for (uint32_t c = 1; c < 4; c++) {
+		if ((busy[c] = core_busy(c)))   // on a long job (the triangle): don't wait for it
+			continue;
 		uint64_t t0 = READ_SYSREG(cntpct_el0);
 		core_run(c, who_job, &who[c]);
 		core_wait(c);
 		t[c] = READ_SYSREG(cntpct_el0) - t0;
 	}
 	for (uint32_t c = 0; c < 4; c++) {
+		if (busy[c]) {
+			say("core %u: busy with a long job\n", c);
+			continue;
+		}
 		say("core %u: MPIDR %08lx, EL%lu, %lu MHz measured", c, who[c].mpidr, who[c].el, who[c].mhz);
 		if (c)
 			say(", %lu jobs, this one %lu us there and back", core_jobs(c), t[c] / 24);
@@ -439,6 +447,35 @@ static void c_gpu(void)
 	}
 	else
 		gpu_start(say);
+}
+
+// joy [MS]: the ADC's channels, then each switch position with EN low and
+// high; with MS, the lowest and highest seen over that long (move the sticks)
+static void c_joy(void)
+{
+	uint64_t ms;
+	if (!arg(1, 0, &ms))
+		return;
+	say("ADC channels 0-2:");
+	for (uint32_t c = 0; c < 3; c++)
+		say(" %d", adc_read(c));
+	say("\n");
+	for (int en = 0; en < 2; en++) {
+		int32_t lo[4], hi[4], now[4];
+		for (uint32_t p = 0; p < 4; p++)
+			lo[p] = hi[p] = now[p] = joy_raw(p, en);
+		uint64_t t0 = READ_SYSREG(cntpct_el0);
+		while (READ_SYSREG(cntpct_el0) - t0 < ms * 24000 / 2)
+			for (uint32_t p = 0; p < 4; p++) {
+				int32_t v = joy_raw(p, en);
+				if (v < lo[p]) lo[p] = v;
+				if (v > hi[p]) hi[p] = v;
+			}
+		say("EN %d:", en);
+		for (uint32_t p = 0; p < 4; p++)
+			say("  [%u] %4d (%d-%d)", p, now[p], lo[p], hi[p]);
+		say("\n");
+	}
 }
 
 // tri: start the spinning triangle (or say how it's going); tri stop
@@ -503,6 +540,7 @@ static const struct command {
 	{ "battery", "",              "charge, voltage, current", c_battery },
 	{ "matmul", "[N]",            "time a matrix multiply, plain and NEON", c_matmul },
 	{ "gpu",    "[job|compute|mm W N]", "GPU on; job: write-value jobs; compute: a shader; mm: check matmul W (0/1)", c_gpu },
+	{ "joy",    "[MS]",           "the analogue sticks, raw (MS: watch that long)", c_joy },
 	{ "tri",    "[stop]",         "a spinning 3D triangle, drawn by core 3", c_tri },
 	{ "cores",  "",               "start cores 1-3, and hear from each", c_cores },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },

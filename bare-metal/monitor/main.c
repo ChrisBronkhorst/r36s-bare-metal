@@ -73,6 +73,7 @@ static uint64_t report[R_COUNT];
 #define PSCI_SYSTEM_OFF   0x84000008
 #define PSCI_SYSTEM_RESET 0x84000009
 #define PSCI_FEATURES     0x8400000a
+#define PSCI_CPU_OFF      0x84000002   // the calling core stops, until a CPU_ON
 #define PSCI_CPU_ON       0xc4000003   // x1 = core (MPIDR), x2 = where, x3 = its x0
 #define PSCI_ALREADY_ON   (~0UL - 3)   // -4
 #define PSCI_INVALID      (~0UL - 1)   // -2
@@ -266,6 +267,9 @@ static uint64_t cpu_on(uint64_t mpidr, uint64_t entry, uint64_t arg)
 	uint32_t core = mpidr & 0xff;
 	if ((mpidr & ~0xffUL & 0xffffff) || core < 1 || core > 3 || entry & 3)
 		return PSCI_INVALID;
+	// A core that went off wrote this with its cache off, straight to RAM:
+	// drop any copy in ours first
+	__asm__ volatile("dc civac, %0\ndsb sy" :: "r"(&core_started[core]) : "memory");
 	if (core_started[core])
 		return PSCI_ALREADY_ON;
 	core_entry[core] = entry;
@@ -289,6 +293,45 @@ static uint64_t cpu_on(uint64_t mpidr, uint64_t entry, uint64_t arg)
 	if (core_power(core, 0))
 		return PSCI_FAILED;
 	return 0;
+}
+
+// PSCI CPU_OFF, on the core itself: it sleeps here in the monitor, whose
+// memory nobody overwrites, with interrupts masked. To the PMU that's an
+// idle core, so a later CPU_ON can cut its power and start it afresh.
+// (The kernel's own code may be replaced meanwhile: a new kernel.)
+//
+// First, its own level-1 data cache: still full of the kernel's data, some of
+// it newer than RAM. Left there, the other cores would keep being handed
+// these old copies (the caches answer each other), even after a new kernel
+// has cleared that memory. So: stop caching, write every line back and drop
+// it ("clean and invalidate", by set and way, the only way to say "all of
+// it"), then leave the cores' coherency group (SMPEN off).
+static void l1_flush(void)
+{
+	__asm__ volatile("msr csselr_el1, xzr\nisb");   // level 1, data
+	uint64_t ccsidr = SYSREG(ccsidr_el1);
+	uint32_t line = (ccsidr & 7) + 4;                 // log2 of the line size
+	uint32_t ways = (ccsidr >> 3 & 0x3ff) + 1, sets = (ccsidr >> 13 & 0x7fff) + 1;
+	uint32_t way_shift = __builtin_clz(ways - 1);     // ways at the top bits
+	for (uint32_t w = 0; w < ways; w++)
+		for (uint32_t s = 0; s < sets; s++)
+			__asm__ volatile("dc cisw, %0" :: "r"((uint64_t)w << way_shift | (uint64_t)s << line));
+	__asm__ volatile("dsb sy");
+}
+
+static void cpu_off(void)
+{
+	uint32_t core = SYSREG(mpidr_el1) & 0xff;
+	__asm__ volatile("msr daifset, #0xf");
+	SET_SYSREG(sctlr_el3, SYSREG(sctlr_el3) & ~(1UL << 2));   // C off
+	__asm__ volatile("isb");
+	l1_flush();
+	SET_SYSREG(s3_1_c15_c2_1, SYSREG(s3_1_c15_c2_1) & ~(1UL << 6));   // SMPEN off
+	__asm__ volatile("isb\ndsb sy");
+	core_started[core] = 0;
+	__asm__ volatile("dsb sy");
+	for (;;)
+		__asm__ volatile("wfi");
 }
 
 // A new core, at EL3 (start.S sent it here with its own stack). Returns
@@ -385,7 +428,8 @@ void smc_handler(uint64_t *x)
 	case PSCI_FEATURES: {
 		uint32_t asked = (uint32_t)x[1];
 		x[0] = asked == PSCI_VERSION || asked == PSCI_FEATURES ||
-		       asked == PSCI_SYSTEM_RESET || asked == PSCI_CPU_ON ? 0 : NOT_SUPPORTED;
+		       asked == PSCI_SYSTEM_RESET || asked == PSCI_CPU_ON ||
+		       asked == PSCI_CPU_OFF ? 0 : NOT_SUPPORTED;
 		break;
 	}
 	case PSCI_SYSTEM_RESET:
@@ -394,6 +438,12 @@ void smc_handler(uint64_t *x)
 	case PSCI_CPU_ON:
 		x[0] = cpu_on(x[1], x[2], x[3]);
 		break;
+	case PSCI_CPU_OFF:
+		if ((SYSREG(mpidr_el1) & 0xff) == 0) {   // not core 0: someone must stay
+			x[0] = PSCI_INVALID;
+			break;
+		}
+		cpu_off();   // never returns
 	case SMC_HELLO:
 		x[0] = HELLO_MAGIC;
 		x[1] = R_COUNT;

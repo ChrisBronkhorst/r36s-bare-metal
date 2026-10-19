@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include "buttons.h"
 #include "cores.h"
+#include "joystick.h"
 #include "render.h"
 #include "screen.h"
 #include "sysreg.h"
@@ -251,7 +252,8 @@ static void spin(void *unused)
 	// red, green and blue corners
 	static const float corner[3][3] = { { 0, 1, 0 }, { -0.866f, -0.5f, 0 }, { 0.866f, -0.5f, 0 } };
 	static const float colour[3][3] = { { 255, 40, 40 }, { 40, 255, 40 }, { 60, 90, 255 } };
-	float turn = 0, speed = 0.03f, tilt = 0.3f;
+	float turn = 0, speed = 0.03f, tilt = 0.3f, mx = 0, my = 0;
+	joy_rest();
 	// The eye: 90 degrees across the width... f = half the width / tan(45)
 	float f = (float)screen.width / 2, cx = (float)screen.width / 2, cy = (float)screen.height / 2;
 
@@ -267,7 +269,14 @@ static void spin(void *unused)
 		if (held & right) speed += 0.002f;
 		if (held & up)    tilt -= 0.03f;
 		if (held & down)  tilt += 0.03f;
-		turn += speed;
+		// Sticks: the left one moves it about, the right one turns and tilts
+		// it (on top of the spin). 512 = all the way.
+		mx += (float)joy_axis(JOY_LX) / 512 * 0.05f;
+		my -= (float)joy_axis(JOY_LY) / 512 * 0.05f;
+		mx = mx < -1.5f ? -1.5f : mx > 1.5f ? 1.5f : mx;
+		my = my < -1.2f ? -1.2f : my > 1.2f ? 1.2f : my;
+		turn += speed + (float)joy_axis(JOY_RX) / 512 * 0.08f;
+		tilt += (float)joy_axis(JOY_RY) / 512 * 0.05f;
 
 		// Turn about the y axis (the spin), then the x axis (the tilt), then
 		// push 2.5 units away and project
@@ -278,6 +287,7 @@ static void spin(void *unused)
 			float x1 = x * cs + z * sn, z1 = -x * sn + z * cs;   // about y
 			float y2 = y * ct - z1 * st, z2 = y * st + z1 * ct;  // about x
 			float depth = z2 + 2.5f;
+			x1 += mx, y2 += my;   // where the sticks moved it
 			v[i] = (struct vertex){ cx + f * x1 / depth, cy - f * y2 / depth, depth,
 						colour[i][0], colour[i][1], colour[i][2] };
 		}

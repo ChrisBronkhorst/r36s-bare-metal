@@ -19,6 +19,8 @@
 #include "mmu.h"
 
 #define PSCI_CPU_ON 0xc4000003
+#define PSCI_CPU_OFF 0x84000002
+#define GRF_CPU_STATUS1 0xff140524UL   // bits 4-7: that core is in wfi
 
 static struct core {
 	volatile uint32_t alive;
@@ -43,6 +45,11 @@ static uint64_t smc4(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
 }
 
 // A new core, MMU and caches on (start.S), interrupts masked
+void cores_off_one(void)
+{
+	smc4(PSCI_CPU_OFF, 0, 0, 0);
+}
+
 void core_main(uint32_t c)
 {
 	vectors_install();   // VBAR is per core: crashes here go to our handler
@@ -96,6 +103,28 @@ void core_run(uint32_t c, void (*fn)(void *arg), void *arg)
 	__asm__ volatile("dmb ish" ::: "memory");   // the details before the number
 	cores[c].job_seq++;
 	__asm__ volatile("dsb ish\nsev" ::: "memory");
+}
+
+// Hand cores 1-3 back to the monitor before a new kernel replaces us. Left
+// in core_main, they'd run the new kernel's bytes as if they were ours.
+static void off_job(void *unused)
+{
+	(void)unused;
+	cores_off_one();
+}
+void cores_stop(void)
+{
+	for (uint32_t c = 1; c < 4; c++) {
+		if (!cores[c].alive || core_busy(c))
+			continue;   // (a busy core: nothing we can do but go on)
+		cores[c].alive = 0;
+		core_run(c, off_job, 0);
+		uint64_t t0, t;
+		__asm__ volatile("mrs %0, cntpct_el0" : "=r"(t0));
+		do   // asleep in the monitor
+			__asm__ volatile("mrs %0, cntpct_el0" : "=r"(t) :: "memory");
+		while (!(*(volatile uint32_t *)GRF_CPU_STATUS1 & 1U << (4 + c)) && t - t0 < 24000 * 10);
+	}
 }
 
 int core_busy(uint32_t c)
