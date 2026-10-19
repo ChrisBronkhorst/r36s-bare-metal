@@ -21,6 +21,16 @@
 #   sector 24576  "trust.img": ATF and OP-TEE, 2 copies <- swapped: our monitor
 #   sector 32768  the BOOT partition
 # The first time, the originals are saved in backup/.
+# Spotlight sometimes holds the card for a moment after a write: retry
+eject_card() {
+  for try in 1 2 3 4 5; do
+    diskutil eject "$1" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  echo "Couldn't eject $1 (something still has it open): try diskutil eject $1" >&2
+  return 1
+}
+
 set -e
 cd "$(dirname "$0")"
 what=$1
@@ -64,7 +74,7 @@ if [ "$what" = ramdump ]; then
   [ -n "$SUDO_USER" ] && chown "$SUDO_USER" "${out%.bin}.txt"
   echo "Saved $out and ${out%.bin}.txt"
   sync
-  diskutil eject "$disk" >/dev/null && echo "Ejected."
+  eject_card "$disk" && echo "Ejected."
   exit 0
 fi
 if [ "$what" = romdump ]; then
@@ -95,7 +105,7 @@ PY
   cat "$out.txt" | head -12
   echo "Saved $out.bin (the ROM), .txt (its text) and .s (disassembly)"
   sync
-  diskutil eject "$disk" >/dev/null && echo "Ejected."
+  eject_card "$disk" && echo "Ejected."
   exit 0
 fi
 make uboot.img >/dev/null
@@ -140,4 +150,4 @@ case "$what" in
   uboot)   $U stock; $T stock; $I stock ;;
 esac
 sync
-diskutil eject "$disk" >/dev/null && echo "Ejected. Put the card in the learning console."
+eject_card "$disk" && echo "Ejected. Put the card in the learning console."
