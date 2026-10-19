@@ -429,6 +429,8 @@ static void c_gpu(void)
 	const char *w = words > 1 ? word[1] : "";
 	if (w[0] == 'j')
 		gpu_job_test(say);
+	else if (w[0] == 'c')
+		gpu_compute_test(say);
 	else
 		gpu_start(say);
 }
@@ -464,7 +466,7 @@ static const struct command {
 	{ "temp",   "",               "the chip's temperature", c_temp },
 	{ "battery", "",              "charge, voltage, current", c_battery },
 	{ "matmul", "[N]",            "time a matrix multiply, plain and NEON", c_matmul },
-	{ "gpu",    "[job]",          "power the GPU on and set it up; job: run a first job", c_gpu },
+	{ "gpu",    "[job|compute]",  "GPU on; job: write-value jobs; compute: run a shader", c_gpu },
 	{ "cores",  "",               "start cores 1-3, and hear from each", c_cores },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },
 	{ "echo",   "WORDS",          "say them back", c_say },

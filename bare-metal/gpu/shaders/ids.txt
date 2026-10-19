@@ -1,0 +1,18 @@
+// model Mali-G31; 128 bytes; work registers 32; preload 1000000000000000; fau count 2; tls 0; wls 0; ubo 0
+clause_0:
+ds(0) eos store 
+{
+    *LSHIFT_OR.i32 t0, r60, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r0:t1, u0.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u0.w0, t1
+    *NOP t0
+    +IADD.s32 r1:t1, t1, u0.w1
+    *IMUL.i32 t0, r60, r60
+    +IADD.s32 r2:t1, t, 0x00000007 /* 0.000000 */
+    *NOP t0
+    +STORE.i32 t1, r0, r1, @r2
+}
+

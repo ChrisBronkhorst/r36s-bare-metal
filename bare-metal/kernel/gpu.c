@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include "gpu.h"
+#include "shaders.h"
 #include "sysreg.h"
 
 #define GPU 0xff400000UL
@@ -202,6 +203,37 @@ static void write_value_job(uint32_t *job, uint32_t index, uint64_t at,
 	job[12] = (uint32_t)value, job[13] = (uint32_t)(value >> 32);
 }
 
+// Run a job chain on job slot 1 and wait for it (up to 100 ms). The
+// settings: address space 0, priority 8, and clean + invalidate the GPU's
+// caches at the start of the chain (so it sees what we wrote) and at the
+// end (so what it wrote reaches RAM). Returns 0 if it finished.
+static int run_chain(const void *first, uint64_t *took, void (*say)(const char *fmt, ...))
+{
+	wr(JOB_INT_CLEAR, 0xffffffff);
+	wr(MMU_INT_CLEAR, 0xffffffff);
+	uint64_t before = ticks();
+	wr(JS(1, JS_HEAD_NEXT), (uint32_t)(uintptr_t)first);
+	wr(JS(1, JS_HEAD_NEXT) + 4, 0);
+	wr(JS(1, JS_AFFINITY_NEXT), shader_present);
+	wr(JS(1, JS_AFFINITY_NEXT) + 4, 0);
+	wr(JS(1, JS_CONFIG_NEXT), 0 | 8 << 16 | 3 << 8 | 3 << 12);
+	wr(JS(1, JS_COMMAND_NEXT), 1);   // START
+	// Done (bit 1) or failed (bit 17), for slot 1
+	uint32_t raw;
+	while (!((raw = rd(JOB_INT_RAWSTAT)) & (1U << 1 | 1U << 17)))
+		if (ticks() - before > 24000 * 100)
+			break;
+	*took = ticks() - before;
+	wr(JOB_INT_CLEAR, raw);
+	if (raw & 1U << 1)
+		return 0;
+	say("job chain didn't finish: JOB_INT_RAWSTAT %08x, JS_STATUS %02x, GPU fault %08x,\n"
+	    "  MMU int %08x, AS0 fault %08x at %08x\n", raw, rd(JS(1, JS_STATUS)),
+	    rd(FAULT_STATUS), rd(MMU_INT_RAWSTAT), rd(AS(0, AS_FAULTSTATUS)),
+	    rd(AS(0, AS_FAULTADDRESS)));
+	return -1;
+}
+
 void gpu_job_test(void (*say)(const char *fmt, ...))
 {
 	if (!started && gpu_start(say))
@@ -217,42 +249,143 @@ void gpu_job_test(void (*say)(const char *fmt, ...))
 	write_value_job(mem.job[2], 3, (uintptr_t)&mem.result[2], 1, 0, 0);
 	flush(&mem.job, sizeof mem.job + sizeof mem.result);
 
-	// Into job slot 1: chain address, which shader cores, then the
-	// settings: address space 0, priority 8, clean and invalidate the GPU's
-	// caches at the start and the end of the chain (so what it writes
-	// reaches RAM), and START.
-	wr(JOB_INT_CLEAR, 0xffffffff);
-	wr(MMU_INT_CLEAR, 0xffffffff);
-	uint64_t before = ticks();
-	wr(JS(1, JS_HEAD_NEXT), (uint32_t)(uintptr_t)mem.job[0]);
-	wr(JS(1, JS_HEAD_NEXT) + 4, 0);
-	wr(JS(1, JS_AFFINITY_NEXT), shader_present);
-	wr(JS(1, JS_AFFINITY_NEXT) + 4, 0);
-	wr(JS(1, JS_CONFIG_NEXT), 0 | 8 << 16 | 3 << 8 | 3 << 12);
-	wr(JS(1, JS_COMMAND_NEXT), 1);
-	// Done (bit 1) or failed (bit 17), for slot 1
-	int timeout = 0;
-	while (!(rd(JOB_INT_RAWSTAT) & (1U << 1 | 1U << 17)))
-		if (ticks() - before > 24000 * 100) {
-			timeout = 1;
-			break;
-		}
-	uint64_t after = ticks();
-	uint32_t raw = rd(JOB_INT_RAWSTAT);
+	uint64_t before = ticks(), took;
+	int failed = run_chain(mem.job[0], &took, say);
+	uint64_t after = before + took;
 	flush(&mem.job, sizeof mem.job + sizeof mem.result);
-
-	say("job slot 1: JOB_INT_RAWSTAT %08x, JS_STATUS %02x, took %lu us\n",
-	    raw, rd(JS(1, JS_STATUS)), (after - before) / 24);
-	if (timeout || !(raw & 2)) {
-		say("didn't finish: GPU fault %08x, MMU int %08x, AS0 fault %08x at %08x\n",
-		    rd(FAULT_STATUS), rd(MMU_INT_RAWSTAT), rd(AS(0, AS_FAULTSTATUS)),
-		    rd(AS(0, AS_FAULTADDRESS)));
+	if (failed)
 		return;
-	}
-	wr(JOB_INT_CLEAR, raw);
+	say("job chain done in %lu us\n", took / 24);
 	say("job 1 status %02x (1 = done): wrote %016lx  %s\n", mem.job[0][0],
 	    mem.result[0], mem.result[0] == 0x00c0ffee12345678UL ? "(right)" : "(WRONG)");
 	say("job 2 status %02x: the GPU's timestamp %lu; CPU's counter was %lu before, %lu after\n",
 	    mem.job[1][0], mem.result[1], before, after);
 	say("job 3 status %02x: GPU clock cycles counted %lu\n", mem.job[2][0], mem.result[2]);
+}
+
+// ---- compute jobs: running a shader program ---------------------------------
+//
+// A compute job (Mesa's v7.xml, "Compute Job"), 192 bytes:
+//   0   the job header (type 4 = compute)
+//   32  "invocation": the workgroup size and how many workgroups, packed
+//       into one word with variable-width fields (pack_invocation)
+//   40  parameters: "job task split", how the GPU divides the work
+//   64  "draw": pointers to everything the shader may use. We fill in:
+//         the renderer state (which shader, its settings)
+//         push uniforms (the values the shader reads as u0, u1, ...)
+//         thread storage (its scratch memory: we give it none)
+//
+// The renderer state descriptor (64 bytes) says where the program is, how
+// many registers each thread needs (32 or 64: fewer registers means more
+// threads at once), which registers the hardware fills in before the
+// program starts (e.g. r60 = the thread's global ID), and how many 64-bit
+// push uniforms to load.
+
+static struct {
+	uint32_t job[48] __attribute__((aligned(64)));
+	uint32_t rsd[16] __attribute__((aligned(64)));
+	uint32_t tls[8] __attribute__((aligned(64)));
+	uint64_t push[8] __attribute__((aligned(64)));
+	uint32_t out[1024] __attribute__((aligned(64)));
+} cmem;
+
+static uint32_t log2_ceil(uint32_t v)
+{
+	uint32_t r = 0;
+	while ((1U << r) < v)
+		r++;
+	return r;
+}
+
+// Workgroup size x,y,z and number of workgroups x,y,z, each stored as
+// (value - 1) in just enough bits, one after another (Mesa's
+// pan_pack_work_groups_compute)
+static void pack_invocation(uint32_t *w, const uint32_t v[6])
+{
+	uint32_t shift[7] = {0}, packed = 0;
+	for (int i = 0; i < 6; i++) {
+		packed |= (v[i] - 1) << shift[i];
+		shift[i + 1] = shift[i] + log2_ceil(v[i]);
+	}
+	w[0] = packed;
+	// size y, size z, groups x, y, z shifts; then "thread group split",
+	// which for compute must equal the groups-x shift
+	w[1] = shift[1] | shift[2] << 5 | shift[3] << 10 | shift[4] << 16 |
+	       shift[5] << 22 | shift[3] << 28;
+}
+
+// Run `code` (Mali machine code) as a compute job: `groups` workgroups of
+// `size` threads, with push uniforms push[0..npush-1]
+static int run_compute(const uint8_t *code, uint32_t code_size, uint32_t regs, uint64_t preload,
+		       uint32_t fau, uint32_t size, uint32_t groups, uint64_t *took,
+		       void (*say)(const char *fmt, ...))
+{
+	uint32_t *j = cmem.job, *r = cmem.rsd;
+	for (int i = 0; i < 48; i++)
+		j[i] = 0;
+	for (int i = 0; i < 16; i++)
+		r[i] = 0;
+	for (int i = 0; i < 8; i++)
+		cmem.tls[i] = 0;
+
+	// Renderer state
+	r[0] = (uint32_t)(uintptr_t)code;
+	r[4] = (regs <= 32 ? 2U : 0U) << 12;   // registers per thread: 2 = 32, 0 = 64
+	// Preload: which of r55-r62 the hardware fills in (bit 7 + n - 55), and
+	// how many 64-bit push uniforms
+	uint32_t pre = 0;
+	for (int reg = 55; reg <= 62; reg++)
+		if (preload >> reg & 1)
+			pre |= 1U << (7 + reg - 55);
+	r[12] = pre | ((fau + 1) / 2) << 15;
+
+	// Thread storage: no scratch memory, no workgroup-shared memory
+	// ("WLS instances" = log2 of 0x80000000, meaning none)
+	cmem.tls[1] = 31;
+
+	// The job
+	j[4] = 1 | 4 << 1 | 1 << 16;   // 64-bit, compute, index 1
+	uint32_t v[6] = {size, 1, 1, groups, 1, 1};
+	pack_invocation(&j[8], v);
+	j[10] = (log2_ceil(size + 1) + 1 + 1) << 26;   // job task split
+	uint32_t *d = &j[16];   // draw
+	d[0] = 3;   // the defaults: "four components per vertex", 64-bit
+	d[12] = (uint32_t)(uintptr_t)cmem.push;
+	d[14] = (uint32_t)(uintptr_t)cmem.rsd;
+	d[28] = (uint32_t)(uintptr_t)cmem.tls;
+
+	flush(code, code_size);
+	flush(&cmem, sizeof cmem);
+	int failed = run_chain(cmem.job, took, say);
+	flush(&cmem, sizeof cmem);
+	if (!failed && (cmem.job[0] & 0xff) != 1) {
+		say("job status %02x (not 1, done)\n", cmem.job[0]);
+		failed = -1;
+	}
+	return failed;
+}
+
+void gpu_compute_test(void (*say)(const char *fmt, ...))
+{
+	if (!started && gpu_start(say))
+		return;
+	const uint32_t size = 16, groups = 4, n = size * groups;
+	for (uint32_t i = 0; i < n + 4; i++)
+		cmem.out[i] = 0xdeadbeef;
+	cmem.push[0] = (uintptr_t)cmem.out;   // the shader's u0: where to write
+	uint64_t took;
+	if (run_compute(shader_ids, sizeof shader_ids, SHADER_IDS_REGS, SHADER_IDS_PRELOAD,
+			SHADER_IDS_FAU, size, groups, &took, say))
+		return;
+	uint32_t wrong = 0;
+	for (uint32_t i = 0; i < n; i++)
+		if (cmem.out[i] != i * i + 7)
+			wrong++;
+	say("compute job done in %lu us: %u threads (%u workgroups of %u), %u wrong\n",
+	    took / 24, n, groups, size, wrong);
+	say("out[0..7]:");
+	for (uint32_t i = 0; i < 8; i++)
+		say(" %u", cmem.out[i]);
+	say("\nout[%u..%u]: %u %u, then (untouched) %08x\n", n - 2, n - 1,
+	    cmem.out[n - 2], cmem.out[n - 1], cmem.out[n]);
 }
