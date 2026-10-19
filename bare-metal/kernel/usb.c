@@ -118,6 +118,7 @@ static struct {
 	uint32_t address, config, alt;
 	uint8_t last_setup[8];
 	uint32_t frames_in, bytes_in, last_type, last_len, frames_too_big;
+	uint32_t frames_out, bytes_out, send_drops;
 	uint32_t notifies, notified;   // queued to the Mac, taken by it
 	uint32_t descs, set_ifaces, clears, classes;
 } st;
@@ -294,6 +295,44 @@ static void endpoints_on(void)
 	w(DIEPCTL(ep_in), EP_SNAK | EP_D0PID | TXF_DATA << 22 | EP_BULK | EP_ACTIVE | bulk_mps);
 	w(DOEPCTL(ep_out), EP_SNAK | EP_D0PID | EP_BULK | EP_ACTIVE | bulk_mps);
 	data_out_arm();
+}
+
+// Send one network frame to the Mac on the bulk IN endpoint. The frame ends
+// with a packet shorter than the maximum; one that fits exactly would need
+// an extra empty packet, so we add a byte instead (the IP length inside
+// says where the data really ends). Waits while the FIFO drains. 0 = sent.
+int usb_send(const uint8_t *frame, uint32_t len)
+{
+	if (!st.alt || len > 1600) {
+		st.send_drops++;
+		return -1;
+	}
+	if (len < 60)
+		len = 60;   // Ethernet's minimum; the caller's buffer must have room
+	if (len % bulk_mps == 0)
+		len++;
+	// The last frame must be gone first
+	if (wait_for(OTG + DIEPCTL(ep_in), EP_ENA, 0, 5000)) {
+		st.send_drops++;
+		return -1;
+	}
+	uint32_t packets = (len + bulk_mps - 1) / bulk_mps;
+	w(DIEPTSIZ(ep_in), 1U << 29 | packets << 19 | len);
+	w(DIEPCTL(ep_in), r(DIEPCTL(ep_in)) | EP_ENA | EP_CNAK);
+	// A packet at a time, each when the FIFO has room for it
+	for (uint32_t done = 0; done < len; done += bulk_mps) {
+		uint32_t n = len - done < bulk_mps ? len - done : bulk_mps;
+		uint64_t end = now() + 5000 * 24;
+		while ((r(DTXFSTS(ep_in)) & 0xffff) < (n + 3) / 4)
+			if (now() > end) {
+				st.send_drops++;
+				return -1;
+			}
+		fifo_write(ep_in, frame + done, n);
+	}
+	st.frames_out++;
+	st.bytes_out += len;
+	return 0;
 }
 
 static void endpoints_off(void)
@@ -765,21 +804,11 @@ void usb_page(void)
 	kputc('\n');
 	label("In/out/nt");
 	kprintf("%u/%u/%u, cfg1 %08x\n", ep_in, ep_out, ep_ntf, st.hwcfg1);
-	label("Notify ep");
-	kprintf("ctl %08x size %08x\n", r(DIEPCTL(ep_ntf)), r(DIEPTSIZ(ep_ntf)));
-	label("");
-	kprintf("int %04x ever %04x free %u  \n", r(DIEPINT(ep_ntf)) & 0xffff, st.ntf_seen & 0xffff,
-		r(DTXFSTS(ep_ntf)) & 0xffff);
-	label("Hardware");
-	kprintf("cfg2 %08x cfg4 %08x\n", st.hwcfg2, st.hwcfg4);
 	label("Frames");
-	kprintf("%u in, %u bytes   \n", st.frames_in, st.bytes_in);
+	kprintf("%u in, %u out, %u lost  \n", st.frames_in, st.frames_out, st.send_drops);
 	label("Last one");
 	if (st.frames_in)
 		kprintf("%s (%04x), %u bytes   \n", type_name(st.last_type), st.last_type, st.last_len);
 	else
 		kputs("-\n");
-	console_goto(0, 22);
-	console_color(YELLOW);
-	kputs("B: back");
 }

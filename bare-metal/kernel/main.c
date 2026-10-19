@@ -32,6 +32,7 @@
 #include "ram.h"
 #include "rom.h"
 #include "usb.h"
+#include "net.h"
 #include "rk817.h"
 #include "scan.h"
 #include "screen.h"
@@ -474,6 +475,7 @@ static void usb_screen(void)
 	if (!started) {
 		started = 1;
 		usb_start();   // the page shows how far it got
+		net_start();
 	}
 	console_init(WHITE, BG);
 	uint64_t shown = 0;
@@ -484,6 +486,10 @@ static void usb_screen(void)
 		if (now() - shown > ticks_per_second / 10) {
 			shown = now();
 			usb_page();
+			net_lines(15);
+			console_goto(0, 22);
+			console_color(YELLOW);
+			kputs("B: back  (ping 192.168.36.1)");
 		}
 		if (buttons_pressed() & bit_of("B"))
 			break;
