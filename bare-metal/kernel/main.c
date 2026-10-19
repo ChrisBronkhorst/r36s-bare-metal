@@ -31,6 +31,7 @@
 #include "monitor.h"
 #include "ram.h"
 #include "rom.h"
+#include "usb.h"
 #include "rk817.h"
 #include "scan.h"
 #include "screen.h"
@@ -465,6 +466,32 @@ static void save_screen(void (*page)(void), const char *(*save)(void), const cha
 	let_go();
 }
 
+// USB: start the controller once, then keep answering the Mac. The driver
+// polls, so this loop never sleeps while the page is open.
+static void usb_screen(void)
+{
+	static int started;
+	if (!started) {
+		started = 1;
+		usb_start();   // the page shows how far it got
+	}
+	console_init(WHITE, BG);
+	uint64_t shown = 0;
+	while (buttons_pressed())
+		usb_poll();
+	for (;;) {
+		usb_poll();
+		if (now() - shown > ticks_per_second / 10) {
+			shown = now();
+			usb_page();
+		}
+		if (buttons_pressed() & bit_of("B"))
+			break;
+	}
+	while (buttons_pressed())
+		usb_poll();
+}
+
 // What's at EL3 (Y tries to read the monitor's memory); R: our SPL
 static void el3_page(void)
 {
@@ -634,7 +661,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	buttons_irq_init();
 
 	console_color(YELLOW);
-	kputs("A keys B power X LCD Y I2C START EL3\nSELECT RAM R1 boot ROM\n");
+	kputs("A keys B power X LCD Y I2C START EL3\nSELECT RAM R1 boot ROM L1 USB\n");
 	uint32_t row = console_row();
 	label("Running");
 	console_goto(0, row + 1);
@@ -685,7 +712,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 				down = 0;
 			}
 		}
-		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y") | bit_of("START") | bit_of("SEL") | bit_of("R1")))
+		if (down & (bit_of("A") | bit_of("B") | bit_of("X") | bit_of("Y") | bit_of("START") | bit_of("SEL") | bit_of("R1") | bit_of("L1")))
 			break;
 		if (down & (bit_of("VOL+") | bit_of("VOL-"))) {
 			if (down & bit_of("VOL+"))
@@ -736,6 +763,8 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 		el3_page();
 	else if (chosen & bit_of("SEL"))
 		save_screen(ram_page, ram_save, "Saved to sector 12288");
+	else if (chosen & bit_of("L1"))
+		usb_screen();
 	else if (chosen & bit_of("R1"))
 		save_screen(rom_page, rom_save, "Saved to sector 12416");
 	button_test();
