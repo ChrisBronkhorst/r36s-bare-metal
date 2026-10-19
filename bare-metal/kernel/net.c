@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "console.h"
 #include "log.h"
+#include "loader.h"
 #include "net.h"
 #include "usb.h"
 
@@ -216,6 +217,33 @@ int net_udp(uint32_t port, const void *data, uint32_t len)
 	return usb_send(out, 14 + 20 + 8 + len);
 }
 
+// ---- the loader: a new kernel from the Mac ------------------------------------
+static void loader(const uint8_t *f, uint32_t ihl, uint32_t total)
+{
+	const uint8_t *u = f + 14 + ihl;
+	uint32_t n = get16(u + 4);   // UDP length, header included
+	if (n < 8 || n > total - ihl)
+		return;
+	int go;
+	uint8_t *r = out + 14 + 20 + 8;
+	uint32_t reply = loader_packet(u + 8, n - 8, r, &go);
+	if (!reply)
+		return;
+	// Back to whoever sent it, from our port to theirs
+	ethernet(f + 6, 0x0800);
+	ipv4(f + 14 + 12, 17, 8 + reply);
+	uint8_t *ru = out + 14 + 20;
+	put16(ru, LOADER_PORT);
+	put16(ru + 2, get16(u));
+	put16(ru + 4, 8 + reply);
+	put16(ru + 6, 0);
+	usb_send(out, 14 + 20 + 8 + reply);
+	if (go) {
+		usb_drain(100000);   // the Mac has our "ok" before we vanish
+		loader_start_new();
+	}
+}
+
 // ---- every frame from the Mac ----------------------------------------------
 static void frame_in(const uint8_t *f, uint32_t len)
 {
@@ -236,6 +264,9 @@ static void frame_in(const uint8_t *f, uint32_t len)
 	uint32_t protocol = f[23];
 	if (protocol == 1 && same(f + 30, our_ip, 4))
 		icmp(f, len, ihl, total);
+	else if (protocol == 17 && same(f + 30, our_ip, 4) && total >= ihl + 8 &&
+		 get16(f + 14 + ihl + 2) == LOADER_PORT)
+		loader(f, ihl, total);
 	else if (protocol == 17)
 		dhcp(f, len, ihl);
 	else

@@ -341,6 +341,20 @@ int usb_send(const uint8_t *frame, uint32_t len)
 	return 0;
 }
 
+// Wait until the Mac has taken what we last sent (up to `us`)
+void usb_drain(uint32_t us)
+{
+	wait_for(OTG + DIEPCTL(ep_in), EP_ENA, 0, us);
+}
+
+// Off the bus: the Mac sees the cable "unplugged". No more interrupts.
+void usb_stop(void)
+{
+	w(GAHBCFG, 0);
+	w(DCTL, r(DCTL) | 1U << 1);
+	delay_us(3000);
+}
+
 static void endpoints_off(void)
 {
 	w(DIEPCTL(ep_in), 0);

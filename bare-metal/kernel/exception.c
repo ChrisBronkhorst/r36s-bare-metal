@@ -143,13 +143,17 @@ void irq_register(uint32_t id, void (*handler)(uint32_t id), uint8_t priority)
 }
 
 // An interrupt: ask the GIC which one, handle it, tell the GIC we're done.
+volatile uint32_t irq_current = GIC_SPURIOUS;   // the one being handled
+
 static void irq(void)
 {
 	uint32_t id = gic_ack();
 	if (id == GIC_SPURIOUS)   // it went away before we asked
 		return;
+	irq_current = id;
 	if (id < MAX_IRQ && handlers[id])
 		handlers[id](id);
+	irq_current = GIC_SPURIOUS;
 	gic_done(id);
 }
 

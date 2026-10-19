@@ -14,6 +14,7 @@ void exception(uint64_t slot, struct regs *r);
 
 // Run handler(id) whenever interrupt `id` arrives (and enable it in the GIC).
 void irq_register(uint32_t id, void (*handler)(uint32_t id), uint8_t priority);
+extern volatile uint32_t irq_current;   // the interrupt being handled, or 1023
 
 // Reset the whole board, through ARM Trusted Firmware. Doesn't return.
 void restart(void);

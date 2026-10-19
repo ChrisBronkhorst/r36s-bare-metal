@@ -34,6 +34,7 @@
 #include "usb.h"
 #include "net.h"
 #include "log.h"
+#include "loader.h"
 #include "rk817.h"
 #include "scan.h"
 #include "screen.h"
@@ -483,6 +484,7 @@ static void usb_screen(void)
 			usb_page();
 			net_lines(15);
 			log_lines(20);
+			loader_lines(21);
 			console_goto(0, 22);
 			console_color(YELLOW);
 			kputs("B: back  (ping 192.168.36.1)");

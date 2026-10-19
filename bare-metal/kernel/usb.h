@@ -10,6 +10,8 @@ int usb_polling(void);  // inside usb_poll right now
 extern void (*usb_idle)(void);   // called at the end of each usb_poll
 void usb_page(void);    // what's happened so far (rows 0-13)
 int usb_send(const uint8_t *frame, uint32_t len);   // a frame to the Mac; 0 = sent
+void usb_drain(uint32_t us);   // wait (up to us) until the Mac has taken it
+void usb_stop(void);           // off the bus, no more interrupts
 
 extern const uint8_t usb_mac_ours[6];   // our end of the link
 
