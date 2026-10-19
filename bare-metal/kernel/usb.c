@@ -125,6 +125,8 @@ static struct {
 	uint32_t descs, set_ifaces, clears, classes;
 } st;
 
+static uint32_t frames_at_link_up;   // frames_in when the link came up
+
 // ---- descriptors --------------------------------------------------------------
 // Little-endian 16-bit values, split into bytes
 #define W(x) ((x) & 0xff), ((x) >> 8)
@@ -458,6 +460,7 @@ static void request(void)
 		st.set_ifaces++;
 		if (index == 1) {
 			if (value && !st.alt) {
+				frames_at_link_up = st.frames_in;
 				endpoints_on();
 				klog("usb: link up");
 			} else if (!value && st.alt) {
@@ -572,7 +575,9 @@ static void frame_done(void)
 void (*usb_idle)(void);
 static int in_poll;
 
-int usb_link_up(void) { return st.alt != 0; }
+// Up, and the Mac has sent us something on it: the Mac drops what we send
+// in the moment between switching the link on and its side being ready
+int usb_link_up(void) { return st.alt && st.frames_in != frames_at_link_up; }
 int usb_polling(void) { return in_poll; }
 
 static void poll(void);
