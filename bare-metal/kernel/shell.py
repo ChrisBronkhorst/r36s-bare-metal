@@ -26,7 +26,7 @@ class Shell:
         self.sock.settimeout(0.5)
         self.seq = random.getrandbits(32)
 
-    def run(self, line, tries=6):
+    def run(self, line, tries=20):
         self.seq = (self.seq + 1) & 0xFFFFFFFF
         packet = struct.pack("<I", self.seq) + line.encode()
         for _ in range(tries):

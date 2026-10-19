@@ -16,6 +16,7 @@
 #include "console.h"
 #include "gpio.h"
 #include "cpufreq.h"
+#include "matmul.h"
 #include "rk817.h"
 #include "thermal.h"
 #include "dump.h"
@@ -390,6 +391,13 @@ static void c_battery(void)
 	    b.ma < 0 ? "out" : "in", b.plugged_in ? rk817_charge_status(b.status) : "not plugged in");
 }
 
+static void c_matmul(void)
+{
+	uint64_t n;
+	if (arg(1, 128, &n))
+		matmul_bench((uint32_t)n, say);
+}
+
 static void c_say(void)
 {
 	for (uint32_t i = 1; i < words; i++)
@@ -413,6 +421,7 @@ static const struct command {
 	{ "stress", "[MS]",           "check the CPU gets the same answers", c_stress },
 	{ "temp",   "",               "the chip's temperature", c_temp },
 	{ "battery", "",              "charge, voltage, current", c_battery },
+	{ "matmul", "[N]",            "time a matrix multiply, plain and NEON", c_matmul },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },
 	{ "echo",   "WORDS",          "say them back", c_say },
 };
