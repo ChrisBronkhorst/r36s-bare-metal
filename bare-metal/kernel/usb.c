@@ -19,6 +19,8 @@
 #include <stdint.h>
 #include "console.h"
 #include "sysreg.h"
+#include "exception.h"
+#include "log.h"
 #include "usb.h"
 
 #define OTG     0xff300000UL
@@ -301,6 +303,8 @@ static void endpoints_on(void)
 // with a packet shorter than the maximum; one that fits exactly would need
 // an extra empty packet, so we add a byte instead (the IP length inside
 // says where the data really ends). Waits while the FIFO drains. 0 = sent.
+static void ep_in_abort(uint32_t n, uint32_t fifo);
+
 int usb_send(const uint8_t *frame, uint32_t len)
 {
 	if (!st.alt || len > 1600) {
@@ -311,11 +315,10 @@ int usb_send(const uint8_t *frame, uint32_t len)
 		len = 60;   // Ethernet's minimum; the caller's buffer must have room
 	if (len % bulk_mps == 0)
 		len++;
-	// The last frame must be gone first
-	if (wait_for(OTG + DIEPCTL(ep_in), EP_ENA, 0, 5000)) {
-		st.send_drops++;
-		return -1;
-	}
+	// The last frame must be gone first; if the Mac never took it, give up
+	// on it (it's stuck in the FIFO and would block everything after)
+	if (wait_for(OTG + DIEPCTL(ep_in), EP_ENA, 0, 5000))
+		ep_in_abort(ep_in, TXF_DATA);
 	uint32_t packets = (len + bulk_mps - 1) / bulk_mps;
 	w(DIEPTSIZ(ep_in), 1U << 29 | packets << 19 | len);
 	w(DIEPCTL(ep_in), r(DIEPCTL(ep_in)) | EP_ENA | EP_CNAK);
@@ -324,7 +327,8 @@ int usb_send(const uint8_t *frame, uint32_t len)
 		uint32_t n = len - done < bulk_mps ? len - done : bulk_mps;
 		uint64_t end = now() + 5000 * 24;
 		while ((r(DTXFSTS(ep_in)) & 0xffff) < (n + 3) / 4)
-			if (now() > end) {
+			if (now() > end) {   // the Mac stopped reading: drop the frame
+				ep_in_abort(ep_in, TXF_DATA);
 				st.send_drops++;
 				return -1;
 			}
@@ -430,6 +434,7 @@ static void request(void)
 	}
 	case 5:     // SET_ADDRESS: this controller takes it before the status stage
 		st.address = value & 0x7f;
+		klog("usb: address %u", st.address);
 		w(DCFG, (r(DCFG) & ~(0x7fU << 4)) | st.address << 4);
 		ep0_ack();
 		break;
@@ -452,10 +457,13 @@ static void request(void)
 	case 11:    // SET_INTERFACE: data interface setting 1 = link up
 		st.set_ifaces++;
 		if (index == 1) {
-			if (value && !st.alt)
+			if (value && !st.alt) {
 				endpoints_on();
-			else if (!value && st.alt)
+				klog("usb: link up");
+			} else if (!value && st.alt) {
 				endpoints_off();
+				klog("usb: link down");
+			}
 			st.alt = value;
 			notify_restart();
 		}
@@ -496,6 +504,7 @@ static void request(void)
 static void on_reset(void)
 {
 	st.resets++;
+	klog("usb: bus reset");
 	st.address = st.config = st.alt = 0;
 	w(DCFG, r(DCFG) & ~(0x7fU << 4));
 	endpoints_off();
@@ -511,6 +520,7 @@ static void on_enum_done(void)
 {
 	st.enums++;
 	st.speed = r(DSTS) >> 1 & 3;
+	klog("usb: %s speed", st.speed == 0 ? "high (480 Mbit/s)" : "full (12 Mbit/s)");
 	bulk_mps = st.speed == 0 ? 512 : 64;   // high speed : full speed
 	config_desc[BULK_IN_MPS] = config_desc[BULK_OUT_MPS] = (uint8_t)(bulk_mps & 0xff);
 	config_desc[BULK_IN_MPS + 1] = config_desc[BULK_OUT_MPS + 1] = (uint8_t)(bulk_mps >> 8);
@@ -559,10 +569,48 @@ static void frame_done(void)
 	data_out_arm();
 }
 
+void (*usb_idle)(void);
+static int in_poll;
+
+int usb_link_up(void) { return st.alt != 0; }
+int usb_polling(void) { return in_poll; }
+
+static void poll(void);
+
+// From the USB interrupt, or from a loop: either way with IRQs masked, so
+// the two never run at once
 void usb_poll(void)
 {
-	if (st.step < 6)
+	uint64_t daif;
+	__asm__ volatile("mrs %0, daif\nmsr daifset, #2" : "=r"(daif) : : "memory");
+	if (st.step == 6 && !in_poll) {
+		in_poll = 1;
+		poll();
+		in_poll = 0;
+		if (usb_idle)
+			usb_idle();   // e.g. send the log, now the link may be up
+	}
+	__asm__ volatile("msr daif, %0" : : "r"(daif) : "memory");
+}
+
+static void usb_interrupt(uint32_t id)
+{
+	(void)id;
+	usb_poll();
+}
+
+// From now on the controller raises its interrupt line (GIC SPI 62) whenever
+// GINTSTS has something we unmasked, and usb_poll runs then
+void usb_irq_on(void)
+{
+	if (st.step != 6)
 		return;
+	irq_register(62 + 32, usb_interrupt, 0xa0);
+	w(GAHBCFG, r(GAHBCFG) | 1);   // the global interrupt enable
+}
+
+static void poll(void)
+{
 	uint32_t g = r(GINTSTS);
 	if (g & I_USBRST) {
 		w(GINTSTS, I_USBRST);
@@ -632,9 +680,24 @@ static void pmu_clear(uint32_t reg, uint32_t bit)
 		wr(PMU + reg, bit << 16);   // the hiword-mask style, if it wants that
 }
 
+static int start(void);
+
 // 0 = connected to the bus (the Mac decides the rest); otherwise the step
 // that failed
 int usb_start(void)
+{
+	static int result = -1;
+	if (result >= 0)   // once is enough
+		return result;
+	result = start();
+	if (result)
+		klog("usb: failed at step %u", (uint32_t)result);
+	else
+		klog("usb: on the bus, waiting for the Mac");
+	return result;
+}
+
+static int start(void)
 {
 	st.step = 1;
 	// 1. The USB power domain (PMU: power bit 5, idle request bit 10)
@@ -717,7 +780,7 @@ int usb_start(void)
 	uint32_t cfg = r(GUSBCFG) & ~(1U << 29 | 0xfU << 10 | 1U << 3 | 1U << 4 | 1U << 6 | 7U);
 	cfg |= 1U << 30 | (width16 ? 1U << 3 | 5U << 10 : 9U << 10) | 7U;
 	w(GUSBCFG, cfg);
-	delay_us(100000);   // switching modes takes up to 25 ms; give it more
+	delay_us(30000);    // switching modes takes up to 25 ms
 	w(GOTGCTL, r(GOTGCTL) | 1U << 7 | 1U << 6 | 1U << 3 | 1U << 2);
 	w(GAHBCFG, 0);      // no DMA, no interrupt line: we poll
 
@@ -734,9 +797,11 @@ int usb_start(void)
 	w(GRSTCTL, 1U << 4);                // and the receive FIFO
 	wait_for(OTG + GRSTCTL, 1U << 4, 0, 10000);
 
-	// Every event visible (we read them; nothing raises an interrupt)
-	w(DIEPMSK, 0x7f);
-	w(DOEPMSK, 0x7f);
+	// The endpoint events we act on: transfer done, endpoint disabled,
+	// SETUP done (OUT) / timeout (IN). Not "IN token with nothing to send",
+	// which the Mac's idle polling would raise all the time
+	w(DIEPMSK, 1 | 2 | 8);
+	w(DOEPMSK, 1 | 2 | 8);
 	w(DAINTMSK, 0xffffffff);
 	w(GINTMSK, I_RXFLVL | I_USBSUSP | I_USBRST | I_ENUMDONE | I_IEPINT | I_OEPINT);
 	w(GINTSTS, 0xffffffff);

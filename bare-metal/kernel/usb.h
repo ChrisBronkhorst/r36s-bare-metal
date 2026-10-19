@@ -2,8 +2,12 @@
 // USB: the console as a network adapter for the Mac (CDC-ECM)
 #include <stdint.h>
 
-int usb_start(void);    // power, clocks, PHY, controller; then connect
+int usb_start(void);    // power, clocks, PHY, controller; then connect (once)
+void usb_irq_on(void);  // from now on usb_poll runs on the USB interrupt
 void usb_poll(void);    // handle whatever the controller has for us
+int usb_link_up(void);  // the Mac has the network interface up
+int usb_polling(void);  // inside usb_poll right now
+extern void (*usb_idle)(void);   // called at the end of each usb_poll
 void usb_page(void);    // what's happened so far (rows 0-13)
 int usb_send(const uint8_t *frame, uint32_t len);   // a frame to the Mac; 0 = sent
 

@@ -33,6 +33,7 @@
 #include "rom.h"
 #include "usb.h"
 #include "net.h"
+#include "log.h"
 #include "rk817.h"
 #include "scan.h"
 #include "screen.h"
@@ -471,12 +472,6 @@ static void save_screen(void (*page)(void), const char *(*save)(void), const cha
 // polls, so this loop never sleeps while the page is open.
 static void usb_screen(void)
 {
-	static int started;
-	if (!started) {
-		started = 1;
-		usb_start();   // the page shows how far it got
-		net_start();
-	}
 	console_init(WHITE, BG);
 	uint64_t shown = 0;
 	while (buttons_pressed())
@@ -487,6 +482,7 @@ static void usb_screen(void)
 			shown = now();
 			usb_page();
 			net_lines(15);
+			log_lines(20);
 			console_goto(0, 22);
 			console_color(YELLOW);
 			kputs("B: back  (ping 192.168.36.1)");
@@ -632,6 +628,7 @@ static void own_screen_start(void)
 
 // uboot = 1 if U-Boot loaded us, 0 if Rockchip's loader did (start.S)
 uint64_t boot_kernel, boot_menu;   // boot timeline: we started, menu ready
+extern uint64_t boot_picture;     // display.c
 
 void kmain(uintptr_t device_tree, uint64_t uboot)
 {
@@ -662,6 +659,13 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 		own_screen_start();
 
 	interrupts_on();
+	// The network over USB, in the background from here on (about 35 ms,
+	// mostly the controller switching to device mode)
+	klog("kernel: started at %lu ms, EL%u", boot_kernel / 24000, (uint32_t)current_el());
+	net_start();
+	log_start();
+	usb_start();
+	usb_irq_on();
 	show_info(device_tree, start_ticks);
 	buttons_init();
 	buttons_irq_init();
@@ -697,6 +701,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	// A clock driven by the timer interrupt. Between ticks the CPU sleeps
 	// (wfi); we add up how long, to see how much of the time it's awake.
 	boot_menu = now();
+	klog("kernel: picture at %lu ms, menu at %lu ms", boot_picture / 24000, boot_menu / 24000);
 	uint64_t asleep = 0, since = now(), shown = ~0UL;
 	uint64_t last_press = now();
 	uint32_t held = buttons_pressed();
@@ -759,6 +764,12 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	}
 	uint32_t chosen = held;
 	let_go();
+	static const char *const names[] = { "A", "B", "X", "Y", "START", "SEL", "R1", "L1" };
+	for (uint32_t i = 0; i < sizeof names / sizeof names[0]; i++)
+		if (chosen & bit_of(names[i])) {
+			klog("menu: %s", names[i]);
+			break;
+		}
 	if (chosen & bit_of("B"))
 		power_page();
 	else if (chosen & bit_of("X"))

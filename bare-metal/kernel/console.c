@@ -91,7 +91,17 @@ void text_at(uint32_t x, uint32_t y, const char *s, uint32_t fg_rgb, uint32_t bg
 		draw_glyph(*s, x, y, fg_rgb, bg_rgb);
 }
 
-static void put_number(uint64_t n, uint32_t base, uint32_t width, char pad, int negative)
+// The formatter writes through `out`, so the same code prints to the
+// screen (kprintf) or into the log (klog)
+typedef void (*sink)(char c);
+
+static void put_str(sink out, const char *s)
+{
+	while (*s)
+		out(*s++);
+}
+
+static void put_number(sink out, uint64_t n, uint32_t base, uint32_t width, char pad, int negative)
 {
 	char digits[24];
 	int len = 0;
@@ -102,22 +112,20 @@ static void put_number(uint64_t n, uint32_t base, uint32_t width, char pad, int 
 	if (negative)
 		width = width ? width - 1 : 0;
 	if (negative && pad == '0')
-		kputc('-');
+		out('-');
 	for (uint32_t i = len; i < width; i++)
-		kputc(pad);
+		out(pad);
 	if (negative && pad != '0')
-		kputc('-');
+		out('-');
 	while (len)
-		kputc(digits[--len]);
+		out(digits[--len]);
 }
 
-void kprintf(const char *fmt, ...)
+void kformat(void (*out)(char c), const char *fmt, va_list args)
 {
-	va_list args;
-	va_start(args, fmt);
 	for (; *fmt; fmt++) {
 		if (*fmt != '%') {
-			kputc(*fmt);
+			out(*fmt);
 			continue;
 		}
 		fmt++;
@@ -133,27 +141,34 @@ void kprintf(const char *fmt, ...)
 			fmt++;
 		}
 		switch (*fmt) {
-		case 's': kputs(va_arg(args, const char *)); break;
-		case 'c': kputc((char)va_arg(args, int)); break;
+		case 's': put_str(out, va_arg(args, const char *)); break;
+		case 'c': out((char)va_arg(args, int)); break;
 		case 'd': {
 			int64_t n = is_long ? va_arg(args, int64_t) : va_arg(args, int);
-			put_number(n < 0 ? -(uint64_t)n : (uint64_t)n, 10, width, pad, n < 0);
+			put_number(out, n < 0 ? -(uint64_t)n : (uint64_t)n, 10, width, pad, n < 0);
 			break;
 		}
 		case 'u':
-			put_number(is_long ? va_arg(args, uint64_t) : va_arg(args, uint32_t), 10, width, pad, 0);
+			put_number(out, is_long ? va_arg(args, uint64_t) : va_arg(args, uint32_t), 10, width, pad, 0);
 			break;
 		case 'x':
-			put_number(is_long ? va_arg(args, uint64_t) : va_arg(args, uint32_t), 16, width, pad, 0);
+			put_number(out, is_long ? va_arg(args, uint64_t) : va_arg(args, uint32_t), 16, width, pad, 0);
 			break;
 		case 'p':
-			kputs("0x");
-			put_number((uintptr_t)va_arg(args, void *), 16, width, pad, 0);
+			put_str(out, "0x");
+			put_number(out, (uintptr_t)va_arg(args, void *), 16, width, pad, 0);
 			break;
-		case '%': kputc('%'); break;
+		case '%': out('%'); break;
 		case '\0': fmt--; break;   // a lone % at the very end
-		default: kputc('%'); kputc(*fmt); break;
+		default: out('%'); out(*fmt); break;
 		}
 	}
+}
+
+void kprintf(const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	kformat(kputc, fmt, args);
 	va_end(args);
 }

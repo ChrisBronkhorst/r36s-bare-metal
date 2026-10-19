@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 #include "console.h"
+#include "log.h"
 #include "net.h"
 #include "usb.h"
 
@@ -120,8 +121,9 @@ static void icmp(const uint8_t *f, uint32_t len, uint32_t ihl, uint32_t total)
 	put16(r + 2, 0);
 	put16(r + 2, checksum(r, n));
 	copy(st.pinger, f + 14 + 12, 4);
-	if (!usb_send(out, 14 + 20 + n))
-		st.pings++;
+	if (!usb_send(out, 14 + 20 + n) && !st.pings++)
+		klog("net: first ping answered, from %u.%u.%u.%u", st.pinger[0], st.pinger[1],
+		     st.pinger[2], st.pinger[3]);
 	(void)len;
 }
 
@@ -190,7 +192,28 @@ static void dhcp(const uint8_t *f, uint32_t len, uint32_t ihl)
 			st.offers++;
 		else
 			st.acks++;
+		klog("net: DHCP %s 192.168.36.2", answer == 2 ? "offered" : "gave the Mac");
 	}
+}
+
+// ---- UDP out ------------------------------------------------------------------
+// To 255.255.255.255: whoever listens on `port` gets it, whatever address
+// the Mac has (or before it has one from us)
+int net_udp(uint32_t port, const void *data, uint32_t len)
+{
+	static const uint8_t everyone[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+	static const uint8_t everyone_ip[4] = { 255, 255, 255, 255 };
+	if (len > sizeof out - 14 - 20 - 8)
+		return -1;
+	ethernet(everyone, 0x0800);
+	ipv4(everyone_ip, 17, 8 + len);
+	uint8_t *u = out + 14 + 20;
+	put16(u, port);
+	put16(u + 2, port);
+	put16(u + 4, 8 + len);
+	put16(u + 6, 0);
+	copy(u + 8, data, len);
+	return usb_send(out, 14 + 20 + 8 + len);
 }
 
 // ---- every frame from the Mac ----------------------------------------------

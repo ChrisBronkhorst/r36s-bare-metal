@@ -1,4 +1,5 @@
 #pragma once
+#include <stdarg.h>
 #include <stdint.h>
 
 // A text console on the screen: the 8x8 font drawn at 2x, in 16x20 pixel cells
@@ -25,6 +26,7 @@ void console_clear_eol(void);   // blank the rest of the current line
 void kputc(char c);
 void kputs(const char *s);   // no newline added
 void kprintf(const char *fmt, ...);   // %s %c %d %u %x %p %%, width like %08x, l for 64-bit
+void kformat(void (*out)(char c), const char *fmt, va_list args);   // the same, to anywhere
 
 // draw text at a pixel position, outside the console grid
 void text_at(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg);
