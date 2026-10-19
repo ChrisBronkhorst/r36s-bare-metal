@@ -100,6 +100,24 @@ static void neon_4x8(uint32_t n)
 
 static uint64_t ticks(void) { return READ_SYSREG(cntpct_el0); }
 
+#define RUNS 50
+
+static void sort(uint64_t *t, uint32_t n)   // insertion sort: n is small
+{
+	for (uint32_t i = 1; i < n; i++)
+		for (uint32_t j = i; j > 0 && t[j - 1] > t[j]; j--) {
+			uint64_t x = t[j];
+			t[j] = t[j - 1], t[j - 1] = x;
+		}
+}
+
+// A time in ticks (24 per microsecond) as microseconds with one decimal
+static void say_us(void (*say)(const char *fmt, ...), uint64_t t)
+{
+	uint64_t tenths = t * 10 / 24;
+	say("%8lu.%lu", tenths / 10, tenths % 10);
+}
+
 // The biggest difference from the reference, relative to the biggest
 // value, in parts per million. Different orders of adding round
 // differently, so a little is expected; a mistake shows as ~1000000.
@@ -144,18 +162,24 @@ void matmul_bench(uint32_t n, void (*say)(const char *fmt, ...))
 	say("%ux%u: %lu multiply-adds, %u KB of data\n", n, n, mads, 3 * n * n * 4 / 1024);
 	say("              ms     GFLOPS  flops/cycle  speed-up  error\n");
 	uint64_t first = 0;
+	static uint64_t times[4][RUNS];
+	static uint32_t runs[4];
 	for (uint32_t v = 0; v < sizeof versions / sizeof versions[0]; v++) {
-		// The best of several runs (at least 3, about 0.2 s): the first
-		// one also pays for filling the caches
-		uint64_t best = ~0ULL, spent = 0;
-		for (uint32_t run = 0; run < 3 || (spent < 24000 * 200 && run < 50); run++) {
+		// Run it again and again (at least 5 times, up to 50 or about
+		// 0.3 s), keeping every time. The first run also pays for filling
+		// the caches: that's warm-up, not noise, so it isn't kept.
+		uint64_t spent = 0;
+		versions[v].run(n);
+		runs[v] = 0;
+		while (runs[v] < 5 || (spent < 24000 * 300 && runs[v] < RUNS)) {
 			uint64_t t = ticks();
 			versions[v].run(n);
 			t = ticks() - t;
 			spent += t;
-			if (t < best)
-				best = t;
+			times[v][runs[v]++] = t;
 		}
+		sort(times[v], runs[v]);
+		uint64_t best = times[v][0];
 		if (v == 0) {
 			for (uint32_t i = 0; i < n * n; i++)
 				ref[i] = C[i];
@@ -170,5 +194,16 @@ void matmul_bench(uint32_t n, void (*say)(const char *fmt, ...))
 		    versions[v].name, best / 24000, best / 240 % 100,
 		    mflops / 1000, mflops / 10 % 100, fpc100 / 100, fpc100 % 100,
 		    up10 / 10, up10 % 10, v ? error_ppm(n) : 0);
+	}
+
+	// How much the same work varies from run to run, in microseconds.
+	// The spread is (slowest - fastest) / fastest.
+	say("\nruns        fastest us   median us  slowest us  spread\n");
+	for (uint32_t v = 0; v < sizeof versions / sizeof versions[0]; v++) {
+		uint64_t *t = times[v], lo = t[0], hi = t[runs[v] - 1];
+		uint64_t ppm = (hi - lo) * 1000000 / (lo ? lo : 1);
+		say("%s %2u", versions[v].name, runs[v]);
+		say_us(say, lo), say_us(say, t[runs[v] / 2]), say_us(say, hi);
+		say("  %lu.%04lu%%\n", ppm / 10000, ppm % 10000);
 	}
 }
