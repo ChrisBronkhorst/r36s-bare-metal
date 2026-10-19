@@ -9,6 +9,7 @@
 #include "buttons.h"
 #include "exception.h"
 #include "gpio.h"
+#include "log.h"
 
 const struct button buttons[] = {
 	{ 1, 12, "U",    "DPAD-UP",      125, 175,  50, 50 },
@@ -46,10 +47,17 @@ volatile uint64_t button_irqs, button_changes;
 
 static void button_interrupt(uint32_t id)
 {
+	static uint32_t was;
 	uint32_t changed = gpio_changed(id - GPIO_IRQ(0));
 	button_irqs++;
 	for (; changed; changed &= changed - 1)   // count the bits
 		button_changes++;
+	// Log each press, whatever page is showing
+	uint32_t now = buttons_pressed();
+	for (uint32_t i = 0; i < button_count; i++)
+		if (now & ~was & 1U << i)
+			klog("button: %s", buttons[i].name);
+	was = now;
 }
 
 void buttons_irq_init(void)
