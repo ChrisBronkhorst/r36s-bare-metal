@@ -27,6 +27,7 @@
 #include "exception.h"
 #include "gic.h"
 #include "loader.h"
+#include "render.h"
 #include "log.h"
 #include "../spl/sd.h"
 #include "usb.h"
@@ -274,6 +275,7 @@ uint32_t loader_packet(const uint8_t *data, uint32_t len, uint8_t *reply, int *g
 // kernel's GIC set-up wouldn't clear it), and the timer stopped
 void loader_start_new(int go)
 {
+	render_stop();   // core 3 off our code, and the console's picture back on screen
 	usb_stop();
 	if (go == 2)
 		restart();

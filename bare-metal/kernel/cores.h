@@ -9,4 +9,5 @@ int core_alive(uint32_t core);
 // Give core `core` (1-3) a function to run; core_wait waits until it's done
 void core_run(uint32_t core, void (*fn)(void *arg), void *arg);
 void core_wait(uint32_t core);
+int core_busy(uint32_t core);   // 1 while it has a job
 uint64_t core_jobs(uint32_t core);

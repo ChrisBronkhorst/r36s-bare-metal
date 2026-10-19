@@ -109,7 +109,7 @@ static void neon_core1(uint32_t n)
 {
 	static uint32_t arg;
 	arg = n;
-	if (!core_alive(1))
+	if (!core_alive(1) || core_busy(1))
 		return neon_4x8(n);
 	core_run(1, neon_job, &arg);
 	core_wait(1);
@@ -132,12 +132,15 @@ static void neon_4cores(uint32_t n)
 		parts[c] = (struct part){ n, row, row + rows };
 		row += rows;
 	}
+	int mine[4] = { 0 };   // the cores that took a part (not busy with something else)
 	for (uint32_t c = 1; c < 4; c++)
-		if (core_alive(c))
+		if (core_alive(c) && !core_busy(c)) {
+			mine[c] = 1;
 			core_run(c, part_job, &parts[c]);
+		}
 	part_job(&parts[0]);
 	for (uint32_t c = 1; c < 4; c++) {
-		if (core_alive(c))
+		if (mine[c])
 			core_wait(c);
 		else
 			part_job(&parts[c]);   // no such core: do it ourselves

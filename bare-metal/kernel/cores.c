@@ -98,6 +98,11 @@ void core_run(uint32_t c, void (*fn)(void *arg), void *arg)
 	__asm__ volatile("dsb ish\nsev" ::: "memory");
 }
 
+int core_busy(uint32_t c)
+{
+	return cores[c].done_seq != cores[c].job_seq;
+}
+
 void core_wait(uint32_t c)
 {
 	while (cores[c].done_seq != cores[c].job_seq)

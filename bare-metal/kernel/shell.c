@@ -18,6 +18,7 @@
 #include "cpufreq.h"
 #include "cores.h"
 #include "gpu.h"
+#include "render.h"
 #include "matmul.h"
 #include "rk817.h"
 #include "thermal.h"
@@ -440,6 +441,36 @@ static void c_gpu(void)
 		gpu_start(say);
 }
 
+// tri: start the spinning triangle (or say how it's going); tri stop
+static void c_tri(void)
+{
+	const char *w = words > 1 ? word[1] : "";
+	if (w[0] >= '1' && w[0] <= '3') {
+		uint64_t took = 0;
+		const char *err = render_test((uint32_t)(w[0] - '0'), &took);
+		say("%s; one frame in %lu us\n", err ? err : "ok", took / 24);
+		if (w[0] != '3')
+			return;
+	}
+	if (w[0] == 's') {
+		render_stop();
+		say("stopped\n");
+	} else if (!render_running()) {
+		const char *err = render_start();
+		say(err ? "%s\n" : "spinning on core 3 (d-pad: spin and tilt; tri: how it's going)\n", err);
+		return;
+	}
+	struct render_stats s = render_stats();
+	if (!s.frames)
+		return;
+	uint64_t f = s.frames;
+	uint64_t fps10 = s.elapsed ? f * 240000000 / s.elapsed : 0;   // tenths
+	say("%lu frames in %lu.%lu s: %lu.%lu frames a second, %lu late\n", f,
+	    s.elapsed / 24000000, s.elapsed / 2400000 % 10, fps10 / 10, fps10 % 10, s.late);
+	say("per frame: clear %lu us, triangle %lu us (%lu pixels), write out %lu us\n",
+	    s.copy / f / 24, s.draw / f / 24, s.pixels / f, s.clean / f / 24);
+}
+
 static void c_matmul(void)
 {
 	uint64_t n;
@@ -472,6 +503,7 @@ static const struct command {
 	{ "battery", "",              "charge, voltage, current", c_battery },
 	{ "matmul", "[N]",            "time a matrix multiply, plain and NEON", c_matmul },
 	{ "gpu",    "[job|compute|mm W N]", "GPU on; job: write-value jobs; compute: a shader; mm: check matmul W (0/1)", c_gpu },
+	{ "tri",    "[stop]",         "a spinning 3D triangle, drawn by core 3", c_tri },
 	{ "cores",  "",               "start cores 1-3, and hear from each", c_cores },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },
 	{ "echo",   "WORDS",          "say them back", c_say },
