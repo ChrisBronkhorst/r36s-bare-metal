@@ -16,6 +16,8 @@
 #include "console.h"
 #include "gpio.h"
 #include "cpufreq.h"
+#include "rk817.h"
+#include "thermal.h"
 #include "dump.h"
 #include "exception.h"
 #include "log.h"
@@ -356,6 +358,28 @@ static void c_stress(void)
 	say("%lu rounds in %lu ms at %u MHz: %lu wrong\n", rounds, ms, cpu_mhz(), wrong);
 }
 
+static void c_temp(void)
+{
+	static const char *const names[2] = { "CPU", "GPU" };
+	for (uint32_t ch = 0; ch < 2; ch++) {
+		int32_t t;
+		uint32_t code = *(volatile uint32_t *)(0xff280020UL + 4 * ch) & 0xfff;
+		if (thermal_read(ch, &t))
+			say("%s  no reading (code %u)\n", names[ch], code);
+		else
+			say("%s  %d.%d C  (code %u)\n", names[ch], t / 10, t % 10, code);
+	}
+}
+
+static void c_battery(void)
+{
+	struct battery b;
+	if (rk817_battery(&b))
+		return say("the power chip didn't answer\n");
+	say("%u%%  %u mV  %d mA %s  %s\n", rk817_battery_percent(&b), b.mv, b.ma,
+	    b.ma < 0 ? "out" : "in", b.plugged_in ? rk817_charge_status(b.status) : "not plugged in");
+}
+
 static void c_say(void)
 {
 	for (uint32_t i = 1; i < words; i++)
@@ -377,6 +401,8 @@ static const struct command {
 	{ "irqs",   "",               "interrupt counts", c_irqs },
 	{ "mhz",    "[MHZ]",          "the CPU's speed: show, or set", c_mhz },
 	{ "stress", "[MS]",           "check the CPU gets the same answers", c_stress },
+	{ "temp",   "",               "the chip's temperature", c_temp },
+	{ "battery", "",              "charge, voltage, current", c_battery },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },
 	{ "echo",   "WORDS",          "say them back", c_say },
 };

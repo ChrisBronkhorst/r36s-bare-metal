@@ -37,6 +37,7 @@
 #include "loader.h"
 #include "rk817.h"
 #include "cpufreq.h"
+#include "thermal.h"
 #include "scan.h"
 #include "screen.h"
 #include "speed.h"
@@ -302,11 +303,19 @@ static void draw_power(void)
 		return;
 	}
 	kprintf("RK%x, revision %u (I2C0, 0x%x)\n", id >> 4, id & 0xf, RK817_ADDR);
+	label("Temp");
+	int32_t cpu, gpu;
+	if (thermal_read(0, &cpu) == 0 && thermal_read(1, &gpu) == 0)
+		kprintf("CPU %d.%d C, GPU %d.%d C", cpu / 10, cpu % 10, gpu / 10, gpu % 10);
+	else
+		kputs("no reading");
+	console_clear_eol();
 	kputc('\n');
 
 	struct battery b;
 	if (rk817_battery(&b) == 0) {
 		label("Battery");
+		kprintf("%u%%, ", rk817_battery_percent(&b));
 		millivolts(b.mv);
 		console_clear_eol();
 		kputc('\n');
@@ -669,6 +678,7 @@ void kmain(uintptr_t device_tree, uint64_t uboot)
 	if (!uboot)
 		own_screen_start();
 
+	thermal_init();
 	interrupts_on();
 	// The network over USB, in the background from here on (about 35 ms,
 	// mostly the controller switching to device mode)

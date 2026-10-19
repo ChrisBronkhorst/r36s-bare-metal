@@ -69,6 +69,35 @@ int rk817_battery(struct battery *b)
 	return 0;
 }
 
+// How full, from the voltage. A battery's voltage at rest ("open circuit")
+// follows a curve from empty to full; this one was measured for a 3000 mAh
+// battery like ours (Linux, rk3326-gameforce-chi.dts; ours is 3200 mAh).
+// But we see the voltage while current flows, and the battery's own
+// resistance (180 milliohms) shifts it: up while charging, down while the
+// console draws power. So first undo that: rest = measured - current x R.
+uint32_t rk817_battery_percent(const struct battery *b)
+{
+	static const struct { uint16_t mv; uint8_t percent; } curve[] = {
+		{3400, 0}, {3625, 5}, {3685, 10}, {3697, 15}, {3718, 20}, {3735, 25},
+		{3748, 30}, {3760, 35}, {3774, 40}, {3788, 45}, {3802, 50}, {3816, 55},
+		{3834, 60}, {3853, 65}, {3877, 70}, {3908, 75}, {3946, 80}, {3975, 85},
+		{4018, 90}, {4071, 95}, {4106, 100},
+	};
+	const uint32_t n = sizeof curve / sizeof curve[0];
+	if (b->status == 4)
+		return 100;   // the charger says it's full
+	int32_t rest = (int32_t)b->mv - b->ma * 180 / 1000;
+	if (rest <= curve[0].mv)
+		return 0;
+	if (rest >= curve[n - 1].mv)
+		return 100;
+	uint32_t i = 1;
+	while (curve[i].mv < rest)
+		i++;
+	return curve[i - 1].percent + (uint32_t)(rest - curve[i - 1].mv) *
+		(curve[i].percent - curve[i - 1].percent) / (curve[i].mv - curve[i - 1].mv);
+}
+
 const char *rk817_charge_status(uint32_t status)
 {
 	static const char *const names[8] = {

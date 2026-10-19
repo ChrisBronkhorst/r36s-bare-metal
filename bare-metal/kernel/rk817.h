@@ -18,6 +18,7 @@ struct battery {
 };
 int rk817_battery(struct battery *b);
 const char *rk817_charge_status(uint32_t status);
+uint32_t rk817_battery_percent(const struct battery *b);   // estimated, 0-100
 
 // The chip's power outputs: 4 DC-DC converters, 9 LDOs, and a 5 V boost
 struct rail {
