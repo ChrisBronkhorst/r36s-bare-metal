@@ -1,0 +1,88 @@
+// model Mali-G31; 464 bytes; work registers 32; preload 3000000000000000; fau count 8; tls 0; wls 0; ubo 0
+clause_0:
+ds(0) nbb r_uncond ncph 
+{
+    *IMUL.i32 r0:t0, r61, u3.w0
+    +NOP t1
+    *NOP t0
+    +MOV.i32 r1:t1, #0.x
+    *NOP t0
+    +MOV.i32 r2:t1, #0.x
+}
+
+clause_3:
+ds(0) nbb r_uncond ncph next_load dwb(0) 
+{
+    *NOP t0
+    +ICMP.u32.m1.ge t1, r2, u3.w0
+    *NOP t0
+    +BRANCHZ.i16.eq t1, t1.h0, clause_8
+}
+
+clause_6:
+ds(0) nbb r_uncond next_store dwb(0) 
+{
+    *NOP t0
+    +JUMP t1, clause_21
+}
+
+clause_8:
+ds(0) nbb load ncph next_load dwb(0) 
+{
+    *NOP t0
+    +IADD.s32 t1, r0, r2
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r3:t1, u0.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u0.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u0.w1
+    *NOP t0
+    +LOAD.i32 t1, r3, t1, @r3
+}
+
+clause_13:
+ds(0) nbb load ncph dwb(0) 
+{
+    *IMUL.i32 t0, r2, u3.w0
+    +IADD.s32 t1, t, r60
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r4:t1, u1.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u1.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u1.w1
+    *NOP t0
+    +LOAD.i32 t1, r4, t1, @r4
+}
+
+clause_18:
+ds(0) nbb r_uncond 
+{
+    *NOP t0
+    +IADD.s32 r2:t1, r2, 0x00000001 /* 0.000000 */
+    *FMA.f32 r1:t0, r3, r4, r1
+    +JUMP t1, clause_3
+}
+
+clause_21:
+ds(0) eos store 
+{
+    *IMUL.i32 t0, r61, u3.w0
+    +IADD.s32 t1, t, r60
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r0:t1, u2.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u2.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u2.w1
+    *NOP t0
+    +STORE.i32 t1, r0, t1, @r1
+}
+

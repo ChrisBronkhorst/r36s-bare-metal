@@ -13,6 +13,7 @@
 #include <arm_neon.h>
 #include <stdint.h>
 #include "cores.h"
+#include "gpu.h"
 #include "matmul.h"
 #include "sysreg.h"
 
@@ -143,6 +144,11 @@ static void neon_4cores(uint32_t n)
 	}
 }
 
+// 7, 8. On the GPU (gpu.c): the same sums, one element or a 4 x 4 block of
+// C per GPU thread
+static void gpu_1(uint32_t n) { gpu_matmul(0, A, B, C, n); }
+static void gpu_4x4(uint32_t n) { gpu_matmul(1, A, B, C, n); }
+
 static uint64_t ticks(void) { return READ_SYSREG(cntpct_el0); }
 
 #define RUNS 50
@@ -204,7 +210,14 @@ void matmul_bench(uint32_t n, void (*say)(const char *fmt, ...))
 		{ "hand NEON 4x8", neon_4x8 },
 		{ "  on core 1  ", neon_core1 },
 		{ "  on 4 cores ", neon_4cores },
+		{ "GPU 1/thread ", gpu_1 },
+		{ "GPU 4x4/thrd ", gpu_4x4 },
 	};
+	uint32_t nv = sizeof versions / sizeof versions[0];
+	if (n % 16 || !gpu_ready(say) || gpu_matmul(1, A, B, C, n) || gpu_matmul(0, A, B, C, n)) {
+		say("(no GPU rows: n must be a multiple of 16, and a first GPU run must work)\n");
+		nv -= 2;
+	}
 	const char *err = cores_start();
 	if (err)
 		say("(other cores: %s; their rows run on core 0)\n", err);
@@ -212,9 +225,9 @@ void matmul_bench(uint32_t n, void (*say)(const char *fmt, ...))
 	say("%ux%u: %lu multiply-adds, %u KB of data\n", n, n, mads, 3 * n * n * 4 / 1024);
 	say("              ms     GFLOPS  flops/cycle  speed-up  error\n");
 	uint64_t first = 0;
-	static uint64_t times[6][RUNS];
-	static uint32_t runs[6];
-	for (uint32_t v = 0; v < sizeof versions / sizeof versions[0]; v++) {
+	static uint64_t times[8][RUNS];
+	static uint32_t runs[8];
+	for (uint32_t v = 0; v < nv; v++) {
 		// Run it again and again (at least 5 times, up to 50 or about
 		// 0.3 s), keeping every time. The first run also pays for filling
 		// the caches: that's warm-up, not noise, so it isn't kept.
@@ -249,7 +262,7 @@ void matmul_bench(uint32_t n, void (*say)(const char *fmt, ...))
 	// How much the same work varies from run to run, in microseconds.
 	// The spread is (slowest - fastest) / fastest.
 	say("\nruns        fastest us   median us  slowest us  spread\n");
-	for (uint32_t v = 0; v < sizeof versions / sizeof versions[0]; v++) {
+	for (uint32_t v = 0; v < nv; v++) {
 		uint64_t *t = times[v], lo = t[0], hi = t[runs[v] - 1];
 		uint64_t ppm = (hi - lo) * 1000000 / (lo ? lo : 1);
 		say("%s %2u", versions[v].name, runs[v]);

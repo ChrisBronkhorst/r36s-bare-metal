@@ -221,12 +221,24 @@ static int run_chain(const void *first, uint64_t *took, void (*say)(const char *
 	// Done (bit 1) or failed (bit 17), for slot 1
 	uint32_t raw;
 	while (!((raw = rd(JOB_INT_RAWSTAT)) & (1U << 1 | 1U << 17)))
-		if (ticks() - before > 24000 * 100)
+		if (ticks() - before > 24000 * 2000)   // 2 s
 			break;
 	*took = ticks() - before;
 	wr(JOB_INT_CLEAR, raw);
 	if (raw & 1U << 1)
 		return 0;
+	if (!(raw & 1U << 17)) {
+		// Still running after 2 s: stop it hard, and start the GPU afresh
+		// next time (gpu_start resets it)
+		wr(JS(1, 0x20), 3);   // JS_COMMAND: HARD_STOP
+		uint64_t t0 = ticks();
+		while (!(rd(JOB_INT_RAWSTAT) & (1U << 1 | 1U << 17)) && ticks() - t0 < 24000 * 10)
+			;
+		say("job chain still running after 2 s: stopped it (JOB_INT_RAWSTAT now %08x)\n",
+		    rd(JOB_INT_RAWSTAT));
+		wr(JOB_INT_CLEAR, 0xffffffff);
+		started = 0;
+	}
 	say("job chain didn't finish: JOB_INT_RAWSTAT %08x, JS_STATUS %02x, GPU fault %08x,\n"
 	    "  MMU int %08x, AS0 fault %08x at %08x\n", raw, rd(JS(1, JS_STATUS)),
 	    rd(FAULT_STATUS), rd(MMU_INT_RAWSTAT), rd(AS(0, AS_FAULTSTATUS)),
@@ -314,11 +326,11 @@ static void pack_invocation(uint32_t *w, const uint32_t v[6])
 	       shift[5] << 22 | shift[3] << 28;
 }
 
-// Run `code` (Mali machine code) as a compute job: `groups` workgroups of
-// `size` threads, with push uniforms push[0..npush-1]
+// Run `code` (Mali machine code) as a compute job: gx x gy workgroups of
+// sx x sy threads, with the push uniforms in cmem.push
 static int run_compute(const uint8_t *code, uint32_t code_size, uint32_t regs, uint64_t preload,
-		       uint32_t fau, uint32_t size, uint32_t groups, uint64_t *took,
-		       void (*say)(const char *fmt, ...))
+		       uint32_t fau, uint32_t sx, uint32_t sy, uint32_t gx, uint32_t gy,
+		       uint64_t *took, void (*say)(const char *fmt, ...))
 {
 	uint32_t *j = cmem.job, *r = cmem.rsd;
 	for (int i = 0; i < 48; i++)
@@ -345,9 +357,9 @@ static int run_compute(const uint8_t *code, uint32_t code_size, uint32_t regs, u
 
 	// The job
 	j[4] = 1 | 4 << 1 | 1 << 16;   // 64-bit, compute, index 1
-	uint32_t v[6] = {size, 1, 1, groups, 1, 1};
+	uint32_t v[6] = {sx, sy, 1, gx, gy, 1};
 	pack_invocation(&j[8], v);
-	j[10] = (log2_ceil(size + 1) + 1 + 1) << 26;   // job task split
+	j[10] = (log2_ceil(sx + 1) + log2_ceil(sy + 1) + 1) << 26;   // job task split
 	uint32_t *d = &j[16];   // draw
 	d[0] = 3;   // the defaults: "four components per vertex", 64-bit
 	d[12] = (uint32_t)(uintptr_t)cmem.push;
@@ -375,7 +387,7 @@ void gpu_compute_test(void (*say)(const char *fmt, ...))
 	cmem.push[0] = (uintptr_t)cmem.out;   // the shader's u0: where to write
 	uint64_t took;
 	if (run_compute(shader_ids, sizeof shader_ids, SHADER_IDS_REGS, SHADER_IDS_PRELOAD,
-			SHADER_IDS_FAU, size, groups, &took, say))
+			SHADER_IDS_FAU, size, 1, groups, 1, &took, say))
 		return;
 	uint32_t wrong = 0;
 	for (uint32_t i = 0; i < n; i++)
@@ -388,4 +400,94 @@ void gpu_compute_test(void (*say)(const char *fmt, ...))
 		say(" %u", cmem.out[i]);
 	say("\nout[%u..%u]: %u %u, then (untouched) %08x\n", n - 2, n - 1,
 	    cmem.out[n - 2], cmem.out[n - 1], cmem.out[n]);
+}
+
+// Matrix multiply on the GPU: C = A x B, n x n floats. The GPU reads A and
+// B from RAM, so we write them out of our cache first, and throw away our
+// cached copy of C afterwards (that's part of the time).
+//   which 0: mm1, one element per thread, workgroups of 8 x 8 threads
+//   which 1: mm4x4, a 4 x 4 block per thread, workgroups of 4 x 4
+// Returns 0, or -1 (not started, n not a multiple of 16, or a GPU fault).
+static void quiet(const char *fmt, ...) { (void)fmt; }
+int gpu_ready(void (*say)(const char *fmt, ...));
+int gpu_matmul(int which, const float *a, const float *b, float *c, uint32_t n)
+{
+	if (!started || n % 16)
+		return -1;
+	flush(a, (uint64_t)n * n * 4);
+	flush(b, (uint64_t)n * n * 4);
+	flush(c, (uint64_t)n * n * 4);
+	cmem.push[0] = (uintptr_t)a;
+	cmem.push[1] = (uintptr_t)b;
+	cmem.push[2] = (uintptr_t)c;
+	cmem.push[3] = n;
+	uint64_t took;
+	int r = which == 0
+		? run_compute(shader_mm1, sizeof shader_mm1, SHADER_MM1_REGS, SHADER_MM1_PRELOAD,
+			      SHADER_MM1_FAU, 8, 8, n / 8, n / 8, &took, quiet)
+		: run_compute(shader_mm4x4, sizeof shader_mm4x4, SHADER_MM4X4_REGS, SHADER_MM4X4_PRELOAD,
+			      SHADER_MM4X4_FAU, 4, 4, n / 16, n / 16, &took, quiet);
+	flush(c, (uint64_t)n * n * 4);
+	return r;
+}
+
+int gpu_ready(void (*say)(const char *fmt, ...))
+{
+	return started || gpu_start(say) == 0;
+}
+
+// gpu mm [which] [n]: a check of the matrix multiply shaders that needs no
+// floating point here: A = the identity matrix (1.0 on the diagonal), B =
+// numbers, so C must come out exactly equal to B. Guard words either side
+// of C catch writes in the wrong place.
+static float ga[64 * 64] __attribute__((aligned(64)));
+static float gb[64 * 64] __attribute__((aligned(64)));
+static struct {
+	uint32_t before[16];
+	float c[64 * 64];
+	uint32_t after[16];
+} gc __attribute__((aligned(64)));
+
+void gpu_matmul_test(int which, uint32_t n, void (*say)(const char *fmt, ...))
+{
+	if (n < 16 || n > 64 || n % 16)
+		return say("n: 16, 32, 48 or 64\n");
+	if (!gpu_ready(say))
+		return;
+	uint32_t *a = (uint32_t *)ga, *b = (uint32_t *)gb, *c = (uint32_t *)gc.c;
+	for (uint32_t i = 0; i < n * n; i++) {
+		a[i] = i / n == i % n ? 0x3f800000 : 0;   // 1.0f or 0
+		b[i] = 0x40000000 + i * 8;               // 2.0f and a little more
+	}
+	for (uint32_t i = 0; i < 64 * 64; i++)
+		c[i] = 0xdeadbeef;
+	for (int i = 0; i < 16; i++)
+		gc.before[i] = gc.after[i] = 0xfeedface;
+	flush(&gc, sizeof gc);
+	cmem.push[0] = (uintptr_t)ga;
+	cmem.push[1] = (uintptr_t)gb;
+	cmem.push[2] = (uintptr_t)gc.c;
+	cmem.push[3] = n;
+	flush(ga, sizeof ga);
+	flush(gb, sizeof gb);
+	uint64_t took;
+	int r = which == 0
+		? run_compute(shader_mm1, sizeof shader_mm1, SHADER_MM1_REGS, SHADER_MM1_PRELOAD,
+			      SHADER_MM1_FAU, 8, 8, n / 8, n / 8, &took, say)
+		: run_compute(shader_mm4x4, sizeof shader_mm4x4, SHADER_MM4X4_REGS, SHADER_MM4X4_PRELOAD,
+			      SHADER_MM4X4_FAU, 4, 4, n / 16, n / 16, &took, say);
+	flush(&gc, sizeof gc);
+	uint32_t wrong = 0, first = 0, guards = 0;
+	for (uint32_t i = 0; i < n * n; i++)
+		if (c[i] != b[i] && !wrong++)
+			first = i;
+	for (uint32_t i = 0; i < 16; i++)
+		guards += (gc.before[i] != 0xfeedface) + (gc.after[i] != 0xfeedface);
+	for (uint32_t i = n * n; i < 64 * 64; i++)
+		guards += c[i] != 0xdeadbeef;
+	say("%s, %ux%u: %s in %lu us, %u of %u wrong, %u guard words changed\n",
+	    which ? "mm4x4" : "mm1", n, n, r ? "FAILED" : "done", took / 24, wrong, n * n, guards);
+	if (wrong)
+		say("first wrong: C[%u][%u] = %08x, should be %08x\n", first / n, first % n,
+		    c[first], b[first]);
 }

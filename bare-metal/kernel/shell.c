@@ -431,6 +431,11 @@ static void c_gpu(void)
 		gpu_job_test(say);
 	else if (w[0] == 'c')
 		gpu_compute_test(say);
+	else if (w[0] == 'm') {
+		uint64_t which, n;
+		if (arg(2, 0, &which) && arg(3, 16, &n))
+			gpu_matmul_test((int)which, (uint32_t)n, say);
+	}
 	else
 		gpu_start(say);
 }
@@ -466,7 +471,7 @@ static const struct command {
 	{ "temp",   "",               "the chip's temperature", c_temp },
 	{ "battery", "",              "charge, voltage, current", c_battery },
 	{ "matmul", "[N]",            "time a matrix multiply, plain and NEON", c_matmul },
-	{ "gpu",    "[job|compute]",  "GPU on; job: write-value jobs; compute: run a shader", c_gpu },
+	{ "gpu",    "[job|compute|mm W N]", "GPU on; job: write-value jobs; compute: a shader; mm: check matmul W (0/1)", c_gpu },
 	{ "cores",  "",               "start cores 1-3, and hear from each", c_cores },
 	{ "smc",    "FN [X1 X2 X3]",  "call the EL3 monitor", c_smc },
 	{ "echo",   "WORDS",          "say them back", c_say },

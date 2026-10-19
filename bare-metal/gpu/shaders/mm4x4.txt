@@ -1,0 +1,446 @@
+// model Mali-G31; 2112 bytes; work registers 64; preload 3000000000000000; fau count 8; tls 0; wls 0; ubo 0
+clause_0:
+ds(0) nbb ncph 
+{
+    *MOV.i32 r2:t0, #0
+    +MOV.i32 r3:t1, #0.x
+    *MOV.i32 r4:t0, #0
+    +MOV.i32 r5:t1, #0.x
+    *NOP t0
+    +MOV.i32 r6:t1, #0.x
+}
+
+clause_3:
+ds(0) nbb r_uncond ncph 
+{
+    *MOV.i32 r7:t0, #0
+    +NOP t1
+    *MOV.i32 r8:t0, #0
+    +MOV.i32 r9:t1, #0.x
+    *MOV.i32 r10:t0, #0
+    +MOV.i32 r11:t1, #0.x
+    *MOV.i32 r12:t0, #0
+    +MOV.i32 r13:t1, #0.x
+    *MOV.i32 r14:t0, #0
+    +MOV.i32 r15:t1, #0.x
+    *LSHIFT_OR.i32 r0:t0, r60, #0, 0x00000002 /* 0.000000 */
+    +MOV.i32 r16:t1, 0x00000000 /* 0.000000 */
+    *LSHIFT_OR.i32 r1:t0, r61, #0, 0x00000002 /* 0.000000 */
+    +MOV.i32 r17:t1, 0x00000000 /* 0.000000 */
+    *NOP t0
+    +MOV.i32 r18:t1, #0.x
+}
+
+clause_9:
+ds(0) nbb r_uncond ncph next_load dwb(0) 
+{
+    *NOP t0
+    +ICMP.u32.m1.ge t1, r18, u3.w0
+    *NOP t0
+    +BRANCHZ.i16.eq t1, t1.h0, clause_14
+}
+
+clause_12:
+ds(0) nbb r_uncond next_store dwb(0) 
+{
+    *NOP t0
+    +JUMP t1, clause_107
+}
+
+clause_14:
+ds(0) nbb load ncph next_load dwb(0) 
+{
+    *IMUL.i32 t0, r1, u3.w0
+    +IADD.s32 t1, t, r18
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r22:t1, u0.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u0.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u0.w1
+    *NOP t0
+    +LOAD.i128 t1, r22, t1, @r29
+}
+
+clause_19:
+ds(0) nbb load ncph next_load dwb(0) 
+{
+    *NOP t0
+    +IADD.s32 t1, r1, 0x00000001 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r18
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r19:t1, u0.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u0.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u0.w1
+    *NOP t0
+    +LOAD.i128 t1, r19, t1, @r33
+}
+
+clause_25:
+ds(0) nbb load ncph next_load dwb(0) 
+{
+    *NOP t0
+    +IADD.s32 t1, r1, 0x00000002 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r18
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r20:t1, u0.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u0.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u0.w1
+    *NOP t0
+    +LOAD.i128 t1, r20, t1, @r37
+}
+
+clause_31:
+ds(0) nbb load ncph next_load dwb(0) 
+{
+    *NOP t0
+    +IADD.s32 t1, r1, 0x00000003 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r18
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r21:t1, u0.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u0.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u0.w1
+    *NOP t0
+    +LOAD.i128 t1, r21, t1, @r19
+}
+
+clause_37:
+ds(0) nbb load ncph dwb(0) 
+{
+    *IMUL.i32 t0, r18, u3.w0
+    +IADD.s32 t1, t, r0
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r23:t1, u1.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u1.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u1.w1
+    *NOP t0
+    +LOAD.i128 t1, r23, t1, @r23
+}
+
+clause_42:
+ds(0) nbb ncph 
+{
+    *FMA.f32 r5:t0, r19, r26, r5
+    +NOP t1
+    *FMA.f32 r4:t0, r19, r25, r4
+    +NOP t1
+    *FMA.f32 r3:t0, r19, r24, r3
+    +NOP t1
+    *FMA.f32 r2:t0, r19, r23, r2
+    +NOP t1
+    *FMA.f32 r9:t0, r37, r26, r9
+    +NOP t1
+    *FMA.f32 r8:t0, r37, r25, r8
+    +NOP t1
+    *FMA.f32 r7:t0, r37, r24, r7
+    +NOP t1
+}
+
+clause_47:
+ds(0) nbb ncph next_load dwb(0) 
+{
+    *FMA.f32 r6:t0, r37, r23, r6
+    +NOP t1
+    *FMA.f32 r13:t0, r33, r26, r13
+    +NOP t1
+    *FMA.f32 r12:t0, r33, r25, r12
+    +NOP t1
+    *FMA.f32 r11:t0, r33, r24, r11
+    +NOP t1
+    *FMA.f32 r10:t0, r33, r23, r10
+    +NOP t1
+    *FMA.f32 r17:t0, r29, r26, r17
+    +NOP t1
+    *FMA.f32 r16:t0, r29, r25, r16
+    +NOP t1
+    *FMA.f32 r15:t0, r29, r24, r15
+    +NOP t1
+}
+
+clause_53:
+ds(0) nbb load ncph dwb(0) 
+{
+    *FMA.f32 r14:t0, r29, r23, r14
+    +NOP t1
+    *NOP t0
+    +IADD.s32 t1, r18, 0x00000001 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r0
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r19:t1, u1.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u1.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u1.w1
+    *NOP t0
+    +LOAD.i128 t1, r19, t1, @r23
+}
+
+clause_59:
+ds(0) nbb ncph 
+{
+    *FMA.f32 r5:t0, r20, r26, r5
+    +NOP t1
+    *FMA.f32 r4:t0, r20, r25, r4
+    +NOP t1
+    *FMA.f32 r3:t0, r20, r24, r3
+    +NOP t1
+    *FMA.f32 r2:t0, r20, r23, r2
+    +NOP t1
+    *FMA.f32 r9:t0, r38, r26, r9
+    +NOP t1
+    *FMA.f32 r8:t0, r38, r25, r8
+    +NOP t1
+    *FMA.f32 r7:t0, r38, r24, r7
+    +NOP t1
+}
+
+clause_64:
+ds(0) nbb ncph next_load dwb(0) 
+{
+    *FMA.f32 r6:t0, r38, r23, r6
+    +NOP t1
+    *FMA.f32 r13:t0, r34, r26, r13
+    +NOP t1
+    *FMA.f32 r12:t0, r34, r25, r12
+    +NOP t1
+    *FMA.f32 r11:t0, r34, r24, r11
+    +NOP t1
+    *FMA.f32 r10:t0, r34, r23, r10
+    +NOP t1
+    *FMA.f32 r17:t0, r30, r26, r17
+    +NOP t1
+    *FMA.f32 r16:t0, r30, r25, r16
+    +NOP t1
+    *FMA.f32 r15:t0, r30, r24, r15
+    +NOP t1
+}
+
+clause_70:
+ds(0) nbb load ncph dwb(0) 
+{
+    *FMA.f32 r14:t0, r30, r23, r14
+    +NOP t1
+    *NOP t0
+    +IADD.s32 t1, r18, 0x00000002 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r0
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r19:t1, u1.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u1.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u1.w1
+    *NOP t0
+    +LOAD.i128 t1, r19, t1, @r23
+}
+
+clause_76:
+ds(0) nbb ncph 
+{
+    *FMA.f32 r5:t0, r21, r26, r5
+    +NOP t1
+    *FMA.f32 r4:t0, r21, r25, r4
+    +NOP t1
+    *FMA.f32 r3:t0, r21, r24, r3
+    +NOP t1
+    *FMA.f32 r2:t0, r21, r23, r2
+    +NOP t1
+    *FMA.f32 r9:t0, r39, r26, r9
+    +NOP t1
+    *FMA.f32 r8:t0, r39, r25, r8
+    +NOP t1
+    *FMA.f32 r7:t0, r39, r24, r7
+    +NOP t1
+}
+
+clause_81:
+ds(0) nbb ncph next_load dwb(0) 
+{
+    *FMA.f32 r6:t0, r39, r23, r6
+    +NOP t1
+    *FMA.f32 r13:t0, r35, r26, r13
+    +NOP t1
+    *FMA.f32 r12:t0, r35, r25, r12
+    +NOP t1
+    *FMA.f32 r11:t0, r35, r24, r11
+    +NOP t1
+    *FMA.f32 r10:t0, r35, r23, r10
+    +NOP t1
+    *FMA.f32 r17:t0, r31, r26, r17
+    +NOP t1
+    *FMA.f32 r16:t0, r31, r25, r16
+    +NOP t1
+    *FMA.f32 r15:t0, r31, r24, r15
+    +NOP t1
+}
+
+clause_87:
+ds(0) nbb load ncph dwb(0) 
+{
+    *FMA.f32 r14:t0, r31, r23, r14
+    +NOP t1
+    *NOP t0
+    +IADD.s32 t1, r18, 0x00000003 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r0
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r19:t1, u1.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u1.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u1.w1
+    *NOP t0
+    +LOAD.i128 t1, r19, t1, @r23
+}
+
+clause_93:
+ds(0) nbb ncph 
+{
+    *FMA.f32 r5:t0, r22, r26, r5
+    +NOP t1
+}
+
+clause_94:
+ds(0) nbb ncph 
+{
+    *FMA.f32 r4:t0, r22, r25, r4
+    +NOP t1
+    *FMA.f32 r3:t0, r22, r24, r3
+    +NOP t1
+    *FMA.f32 r2:t0, r22, r23, r2
+    +NOP t1
+    *FMA.f32 r9:t0, r40, r26, r9
+    +NOP t1
+    *FMA.f32 r8:t0, r40, r25, r8
+    +NOP t1
+    *FMA.f32 r7:t0, r40, r24, r7
+    +NOP t1
+    *FMA.f32 r6:t0, r40, r23, r6
+    +NOP t1
+    *FMA.f32 r13:t0, r36, r26, r13
+    +NOP t1
+}
+
+clause_100:
+ds(0) nbb r_uncond 
+{
+    *FMA.f32 r12:t0, r36, r25, r12
+    +NOP t1
+    *FMA.f32 r11:t0, r36, r24, r11
+    +NOP t1
+    *FMA.f32 r10:t0, r36, r23, r10
+    +NOP t1
+    *FMA.f32 r17:t0, r32, r26, r17
+    +NOP t1
+    *FMA.f32 r16:t0, r32, r25, r16
+    +NOP t1
+    *FMA.f32 r15:t0, r32, r24, r15
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r18:t1, r18, 0x00000004 /* 0.000000 */
+    *FMA.f32 r14:t0, r32, r23, r14
+    +JUMP t1, clause_9
+}
+
+clause_107:
+ds(0) osrb nbb store ncph next_store dwb(0) 
+{
+    *IMUL.i32 t0, r1, u3.w0
+    +IADD.s32 t1, t, r0
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r18:t1, u2.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u2.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u2.w1
+    *NOP t0
+    +STORE.i128 t1, r18, t1, @r14
+}
+
+clause_112:
+ds(0) osrb nbb store ncph next_store dwb(0) 
+{
+    *NOP t0
+    +IADD.s32 t1, r1, 0x00000001 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r0
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r14:t1, u2.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u2.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u2.w1
+    *NOP t0
+    +STORE.i128 t1, r14, t1, @r10
+}
+
+clause_118:
+ds(0) nbb store ncph next_store dwb(0) 
+{
+    *NOP t0
+    +IADD.s32 t1, r1, 0x00000002 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r0
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r10:t1, u2.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u2.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u2.w1
+    *NOP t0
+    +STORE.i128 t1, r10, t1, @r6
+}
+
+clause_124:
+ds(0) eos store 
+{
+    *NOP t0
+    +IADD.s32 t1, r1, 0x00000003 /* 0.000000 */
+    *IMUL.i32 t0, t1, u3.w0
+    +IADD.s32 t1, t, r0
+    *LSHIFT_OR.i32 t0, t1, #0, 0x00000002 /* 0.000000 */
+    +NOP t1
+    *NOP t0
+    +IADD.s32 r0:t1, u2.w0, t0
+    *NOP t0
+    +ICMP.u32.gt t1, u2.w0, t1
+    *NOP t0
+    +IADD.s32 t1, t1, u2.w1
+    *NOP t0
+    +STORE.i128 t1, r0, t1, @r2
+}
+
