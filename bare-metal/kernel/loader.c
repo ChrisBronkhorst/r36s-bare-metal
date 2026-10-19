@@ -32,6 +32,7 @@
 #define DATA    2
 #define GO      3
 #define HEADER  4
+#define REBOOT  5   // restart the console: power-on, from the card
 #ifndef LOAD_AT
 #define LOAD_AT 0x200000UL
 #endif
@@ -181,6 +182,9 @@ uint32_t loader_packet(const uint8_t *data, uint32_t len, uint8_t *reply, int *g
 			if (a == st.header_got)
 				st.header_got += b;
 		}
+	} else if (kind == REBOOT) {
+		klog("loader: rebooting");
+		*go = 2;
 	} else if (kind == GO) {
 		if (!st.expecting || st.received != st.size)
 			status = NO_START;
@@ -214,9 +218,11 @@ uint32_t loader_packet(const uint8_t *data, uint32_t len, uint8_t *reply, int *g
 // Leave: the Mac must see us go (so it resets the link for the new kernel),
 // the interrupt we're in the middle of must be finished in the GIC (the new
 // kernel's GIC set-up wouldn't clear it), and the timer stopped
-void loader_start_new(void)
+void loader_start_new(int go)
 {
 	usb_stop();
+	if (go == 2)
+		restart();
 	if (irq_current != GIC_SPURIOUS)
 		gic_done(irq_current);
 	__asm__ volatile("msr cntp_ctl_el0, xzr\nisb");

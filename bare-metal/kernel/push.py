@@ -3,6 +3,7 @@
 
     python3 push.py kernel.img          (or: make push)
     python3 push.py --try kernel.img    (or: make try) RAM only, not saved
+    python3 push.py --reboot            (or: make reboot) restart the console
 
 By default the console also saves it to the card, so it's the kernel the
 next power-on starts: we send the 2 KB LOADER header that goes in front of
@@ -28,7 +29,7 @@ import importlib.util
 
 CONSOLE = ("192.168.36.1", 5001)
 MAGIC = 0x4853504B  # "KPSH"
-START, DATA, GO, HEADER = 1, 2, 3, 4
+START, DATA, GO, HEADER, REBOOT = 1, 2, 3, 4, 5
 PIECE = 1400
 STATUS = {0: "ok", 1: "too big", 2: "bad piece", 3: "bad CRC",
           4: "not an ARM64 kernel image", 5: "no start (did the console reboot?)",
@@ -63,8 +64,40 @@ def ask(sock, kind, a, b, payload=b"", tries=20, wait=0.2):
     sys.exit(f"push: no answer from {CONSOLE[0]} (is the cable in and the console on?)")
 
 
+def show_log(log, seconds=8):
+    """The console's log until it's back on the network"""
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            data, _ = log.recvfrom(2000)
+        except socket.timeout:
+            continue
+        text = data.decode(errors="replace")
+        print(text, end="" if text.endswith("\n") else "\n")
+        if "link up" in text or "DHCP gave" in text:
+            end = min(end, time.time() + 1)
+
+
+def listen_log():
+    # SO_REUSEPORT lets other listeners on port 5000 keep theirs
+    log = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    log.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    log.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    log.bind(("", 5000))
+    log.settimeout(0.5)
+    return log
+
+
 def main():
     args = sys.argv[1:]
+    if "--reboot" in args:
+        log = listen_log()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(0.2)
+        ask(sock, REBOOT, 0, 0)
+        print("push: the console is restarting")
+        show_log(log, 15)   # a cold boot takes a few seconds
+        return
     keep = "--try" not in args
     args = [a for a in args if a != "--try"]
     path = args[0] if args else "kernel.img"
@@ -72,13 +105,8 @@ def main():
     image += b"\0" * (-len(image) % 4)   # as on the card
     crc = zlib.crc32(image)
 
-    # The log listener first, so we don't miss the new kernel's first lines.
-    # SO_REUSEPORT lets other listeners on port 5000 keep theirs.
-    log = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    log.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    log.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    log.bind(("", 5000))
-    log.settimeout(0.5)
+    # The log listener first, so we don't miss the new kernel's first lines
+    log = listen_log()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(0.2)
@@ -106,17 +134,7 @@ def main():
           + ("saved to the card" if keep else "not saved (RAM only)")
           + ": the new kernel is starting")
 
-    # Its log: from start-up until it's back on the network
-    end = time.time() + 8
-    while time.time() < end:
-        try:
-            data, _ = log.recvfrom(2000)
-        except socket.timeout:
-            continue
-        text = data.decode(errors="replace")
-        print(text, end="" if text.endswith("\n") else "\n")
-        if "link up" in text or "DHCP gave" in text:
-            end = min(end, time.time() + 1)
+    show_log(log)
 
 
 if __name__ == "__main__":
