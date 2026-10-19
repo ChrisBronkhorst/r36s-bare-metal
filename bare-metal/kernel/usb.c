@@ -76,8 +76,14 @@
 #define EP_ACTIVE (1U << 15)
 
 // Our endpoints
-#define EP_DATA   1   // bulk: IN 0x81 frames to the Mac, OUT 0x01 frames from it
-#define EP_NOTIFY 2   // interrupt IN 0x82: "the cable is plugged in", to the Mac
+// Our endpoints. The controller can be built with some endpoints one-way
+// only (GHWCFG1 says which), so usb_start picks the numbers:
+static uint32_t ep_in = 1;    // bulk IN: frames to the Mac
+static uint32_t ep_out = 1;   // bulk OUT: frames from the Mac
+static uint32_t ep_ntf = 2;   // interrupt IN: "the cable is plugged in"
+// Each IN endpoint sends from its own transmit FIFO (endpoint 0 has FIFO 0)
+#define TXF_DATA   1
+#define TXF_NOTIFY 2
 
 static inline uint32_t rd(uintptr_t a) { return *(volatile uint32_t *)a; }
 static inline void wr(uintptr_t a, uint32_t v) { *(volatile uint32_t *)a = v; }
@@ -105,7 +111,8 @@ void (*usb_frame_in)(const uint8_t *frame, uint32_t len);
 // What's happened, for the page
 static struct {
 	int step;                  // how far usb_start got
-	uint32_t id, hwcfg2, hwcfg3, hwcfg4;
+	uint32_t id, hwcfg1, hwcfg2, hwcfg3, hwcfg4;
+	uint32_t ntf_seen;         // every event the notify endpoint flagged
 	uint32_t resets, enums, suspends, setups, stalls;
 	uint32_t speed;            // 0 high, 1/3 full
 	uint32_t address, config, alt;
@@ -148,15 +155,19 @@ static uint8_t config_desc[CONFIG_LEN] = {
 	13, 0x24, 0x0f, 4,                        // Ethernet: MAC address = string 4
 	0, 0, 0, 0,                               //   no statistics
 	W(1514), W(0), 0,                         //   largest frame, no filters
-	7, 5, 0x80 | EP_NOTIFY, 3, W(16), 8,      // interrupt IN, 16 bytes, every 16 ms
+	7, 5, 0x82, 3, W(16), 8,      // interrupt IN, 16 bytes, every 16 ms
 
 	// Interface 1: data. Setting 0 has no endpoints (link down); setting 1
 	// has the two bulk ones (link up)
 	9, 4, 1, 0, 0, 0x0a, 0, 0, 0,
 	9, 4, 1, 1, 2, 0x0a, 0, 0, 0,
-	7, 5, 0x80 | EP_DATA, 2, W(512), 0,       // bulk IN (patched to 64 at full speed)
-	7, 5, EP_DATA, 2, W(512), 0,              // bulk OUT
+	7, 5, 0x81, 2, W(512), 0,       // bulk IN (patched to 64 at full speed)
+	7, 5, 0x01, 2, W(512), 0,               // bulk OUT
 };
+// Where the endpoint numbers and packet sizes sit, for patching
+#define NOTIFY_ADDR  (CONFIG_LEN - 39 + 2)
+#define BULK_IN_ADDR (CONFIG_LEN - 14 + 2)
+#define BULK_OUT_ADDR (CONFIG_LEN - 7 + 2)
 #define BULK_IN_MPS  (CONFIG_LEN - 14 + 4)
 #define BULK_OUT_MPS (CONFIG_LEN - 7 + 4)
 
@@ -274,35 +285,37 @@ static void data_out_arm(void)
 {
 	frame_len = 0;
 	uint32_t packets = sizeof frame_buf / bulk_mps;
-	w(DOEPTSIZ(EP_DATA), packets << 19 | sizeof frame_buf);
-	w(DOEPCTL(EP_DATA), r(DOEPCTL(EP_DATA)) | EP_ENA | EP_CNAK);
+	w(DOEPTSIZ(ep_out), packets << 19 | sizeof frame_buf);
+	w(DOEPCTL(ep_out), r(DOEPCTL(ep_out)) | EP_ENA | EP_CNAK);
 }
 
 static void endpoints_on(void)
 {
-	w(DIEPCTL(EP_DATA), EP_SNAK | EP_D0PID | (uint32_t)EP_DATA << 22 | EP_BULK | EP_ACTIVE | bulk_mps);
-	w(DOEPCTL(EP_DATA), EP_SNAK | EP_D0PID | EP_BULK | EP_ACTIVE | bulk_mps);
+	w(DIEPCTL(ep_in), EP_SNAK | EP_D0PID | TXF_DATA << 22 | EP_BULK | EP_ACTIVE | bulk_mps);
+	w(DOEPCTL(ep_out), EP_SNAK | EP_D0PID | EP_BULK | EP_ACTIVE | bulk_mps);
 	data_out_arm();
 }
 
 static void endpoints_off(void)
 {
-	w(DIEPCTL(EP_DATA), 0);
-	w(DOEPCTL(EP_DATA), 0);
+	w(DIEPCTL(ep_in), 0);
+	w(DOEPCTL(ep_out), 0);
 }
 
 // Stop an IN endpoint's pending transfer and empty its FIFO: ask it to
 // NAK, wait until it does, disable it, wait, then flush
-static void ep_in_abort(uint32_t n)
+static void ep_in_abort(uint32_t n, uint32_t fifo)
 {
 	if (r(DIEPCTL(n)) & EP_ENA) {
 		w(DIEPCTL(n), r(DIEPCTL(n)) | EP_SNAK);
 		wait_for(OTG + DIEPINT(n), 1U << 6, 1U << 6, 1000);   // NAK in effect
 		w(DIEPCTL(n), r(DIEPCTL(n)) | EP_DIS | EP_SNAK);
 		wait_for(OTG + DIEPINT(n), 1U << 1, 1U << 1, 1000);   // disabled
+		if (n == ep_ntf)
+			st.ntf_seen |= r(DIEPINT(n));
 		w(DIEPINT(n), 1U << 6 | 1U << 1);
 	}
-	w(GRSTCTL, n << 6 | 1U << 5);
+	w(GRSTCTL, fifo << 6 | 1U << 5);
 	wait_for(OTG + GRSTCTL, 1U << 5, 0, 1000);
 }
 
@@ -324,16 +337,16 @@ static void notify_kick(void)
 	notify_queue &= notify_queue & 1 ? ~1U : ~2U;
 	// Bits 29-30, "multi count": packets per microframe. 0 is invalid on
 	// every IN endpoint but endpoint 0; the Mac's reads failed until it was 1
-	w(DIEPTSIZ(EP_NOTIFY), 1U << 29 | 1U << 19 | len);
-	w(DIEPCTL(EP_NOTIFY), r(DIEPCTL(EP_NOTIFY)) | EP_ENA | EP_CNAK);
-	fifo_write(EP_NOTIFY, msg, len);
+	w(DIEPTSIZ(ep_ntf), 1U << 29 | 1U << 19 | len);
+	w(DIEPCTL(ep_ntf), r(DIEPCTL(ep_ntf)) | EP_ENA | EP_CNAK);
+	fifo_write(ep_ntf, msg, len);   // pushed by endpoint number
 	notify_busy = 1;
 	st.notifies++;
 }
 
 static void notify_restart(void)
 {
-	ep_in_abort(EP_NOTIFY);
+	ep_in_abort(ep_ntf, TXF_NOTIFY);
 	notify_busy = 0;
 	notify_queue = st.alt ? 3 : 0;
 	notify_kick();
@@ -385,11 +398,11 @@ static void request(void)
 		st.config = value & 0xff;
 		st.alt = 0;
 		endpoints_off();
-		ep_in_abort(EP_NOTIFY);
+		ep_in_abort(ep_ntf, TXF_NOTIFY);
 		notify_busy = 0;
 		notify_queue = 0;
 		if (st.config)
-			w(DIEPCTL(EP_NOTIFY), EP_SNAK | EP_D0PID | (uint32_t)EP_NOTIFY << 22 | EP_INTR |
+			w(DIEPCTL(ep_ntf), EP_SNAK | EP_D0PID | TXF_NOTIFY << 22 | EP_INTR |
 			  EP_ACTIVE | 16);
 		ep0_ack();
 		break;
@@ -424,7 +437,7 @@ static void request(void)
 			uint32_t n = index & 0xf;
 			if (index & 0x80) {
 				w(DIEPCTL(n), (r(DIEPCTL(n)) & ~EP_STALL) | EP_D0PID);
-				if (n == EP_NOTIFY)
+				if (n == ep_ntf)
 					notify_restart();
 			} else if (n) {
 				w(DOEPCTL(n), (r(DOEPCTL(n)) & ~EP_STALL) | EP_D0PID);
@@ -447,7 +460,7 @@ static void on_reset(void)
 	st.address = st.config = st.alt = 0;
 	w(DCFG, r(DCFG) & ~(0x7fU << 4));
 	endpoints_off();
-	w(DIEPCTL(EP_NOTIFY), 0);
+	w(DIEPCTL(ep_ntf), 0);
 	notify_busy = 0;
 	notify_queue = 0;
 	w(GRSTCTL, 0x10U << 6 | 1U << 5);   // flush every transmit FIFO
@@ -479,7 +492,7 @@ static void receive(void)
 			if (i < 2)
 				setup[i] = v;
 		}
-	} else if (kind == 2 && ep == EP_DATA) { // part of a network frame
+	} else if (kind == 2 && ep == ep_out)  { // part of a network frame
 		for (uint32_t i = 0; i < words; i++) {
 			uint32_t v = r(FIFO(0));
 			if (frame_len + 4 * i + 4 <= sizeof frame_buf)
@@ -550,23 +563,24 @@ void usb_poll(void)
 			}
 		}
 	}
-	if (daint & (1U << (16 + EP_DATA))) {    // a whole frame from the Mac
-		uint32_t i = r(DOEPINT(EP_DATA));
-		w(DOEPINT(EP_DATA), i);
+	if (daint & (1U << (16 + ep_out))) {     // a whole frame from the Mac
+		uint32_t i = r(DOEPINT(ep_out));
+		w(DOEPINT(ep_out), i);
 		if (i & 1)
 			frame_done();
 	}
-	if (daint & (1U << EP_NOTIFY)) {         // the Mac took a notification
-		uint32_t i = r(DIEPINT(EP_NOTIFY));
-		w(DIEPINT(EP_NOTIFY), i);
+	st.ntf_seen |= r(DIEPINT(ep_ntf));
+	if (daint & (1U << ep_ntf)) {            // the Mac took a notification
+		uint32_t i = r(DIEPINT(ep_ntf));
+		w(DIEPINT(ep_ntf), i);
 		if (i & 1) {
 			st.notified++;
 			notify_busy = 0;
 			notify_kick();
 		}
 	}
-	if (daint & (1U << EP_DATA))
-		w(DIEPINT(EP_DATA), r(DIEPINT(EP_DATA)));
+	if (daint & (1U << ep_in))
+		w(DIEPINT(ep_in), r(DIEPINT(ep_in)));
 }
 
 // ---- start ------------------------------------------------------------------------------
@@ -615,11 +629,29 @@ int usb_start(void)
 	st.step = 4;
 	// 4. The controller: is it there? Then reset its core
 	st.id = r(GSNPSID);
+	st.hwcfg1 = r(0x044);   // GHWCFG1: 2 bits per endpoint, 1 = IN only, 2 = OUT only
 	st.hwcfg2 = r(GHWCFG2);
 	st.hwcfg3 = r(GHWCFG3);
 	st.hwcfg4 = r(GHWCFG4);
 	if ((st.id >> 16) != 0x4f54)   // "OT"
 		return 4;
+	// Pick endpoints that can go the way we need
+	uint32_t eps = st.hwcfg2 >> 10 & 0xf;   // how many, besides 0
+	ep_in = ep_out = ep_ntf = 0;
+	for (uint32_t i = 1; i <= eps; i++) {
+		uint32_t dir = st.hwcfg1 >> (2 * i) & 3;
+		if (!(dir & 1) && !ep_out)
+			ep_out = i;
+		if (!(dir & 2) && !ep_in)
+			ep_in = i;
+		else if (!(dir & 2) && !ep_ntf)
+			ep_ntf = i;
+	}
+	if (!ep_in || !ep_out || !ep_ntf)
+		return 4;
+	config_desc[NOTIFY_ADDR] = (uint8_t)(0x80 | ep_ntf);
+	config_desc[BULK_IN_ADDR] = (uint8_t)(0x80 | ep_in);
+	config_desc[BULK_OUT_ADDR] = (uint8_t)ep_out;
 	if (wait_for(OTG + GRSTCTL, 1U << 31, 1U << 31, 100000))
 		return 4;
 	w(GRSTCTL, 1);
@@ -656,8 +688,8 @@ int usb_start(void)
 	// endpoint 0 (16 = 64 bytes), bulk IN (128 = 512 bytes), notify (16)
 	w(GRXFSIZ, 280);
 	w(GNPTXFSIZ, 16U << 16 | 280);
-	w(DPTXFSIZ(EP_DATA), 128U << 16 | 296);
-	w(DPTXFSIZ(EP_NOTIFY), 16U << 16 | 424);
+	w(DPTXFSIZ(TXF_DATA), 128U << 16 | 296);
+	w(DPTXFSIZ(TXF_NOTIFY), 16U << 16 | 424);
 	w(GRSTCTL, 0x10U << 6 | 1U << 5);   // flush all transmit FIFOs
 	wait_for(OTG + GRSTCTL, 1U << 5, 0, 10000);
 	w(GRSTCTL, 1U << 4);                // and the receive FIFO
@@ -731,6 +763,15 @@ void usb_page(void)
 	for (int i = 0; i < 8; i++)
 		kprintf("%02x", st.last_setup[i]);
 	kputc('\n');
+	label("In/out/nt");
+	kprintf("%u/%u/%u, cfg1 %08x\n", ep_in, ep_out, ep_ntf, st.hwcfg1);
+	label("Notify ep");
+	kprintf("ctl %08x size %08x\n", r(DIEPCTL(ep_ntf)), r(DIEPTSIZ(ep_ntf)));
+	label("");
+	kprintf("int %04x ever %04x free %u  \n", r(DIEPINT(ep_ntf)) & 0xffff, st.ntf_seen & 0xffff,
+		r(DTXFSTS(ep_ntf)) & 0xffff);
+	label("Hardware");
+	kprintf("cfg2 %08x cfg4 %08x\n", st.hwcfg2, st.hwcfg4);
 	label("Frames");
 	kprintf("%u in, %u bytes   \n", st.frames_in, st.bytes_in);
 	label("Last one");
