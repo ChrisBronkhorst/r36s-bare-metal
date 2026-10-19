@@ -246,6 +246,16 @@ static void c_cpu(void)
 	say("TTBR0_EL2   %08lx\n", READ_SYSREG(ttbr0_el2));
 	say("DAIF        %lx\n", READ_SYSREG(daif) >> 6);
 	say("CNTFRQ      %lu Hz\n", READ_SYSREG(cntfrq_el0));
+	// What the CPU can do: each 4-bit field is a feature's level (0 = none)
+	uint64_t pfr0 = READ_SYSREG(id_aa64pfr0_el1), isar0 = READ_SYSREG(id_aa64isar0_el1);
+	say("PFR0        %08lx  (FP %s, SIMD %s)\n", pfr0,
+	    (pfr0 >> 16 & 15) == 15 ? "no" : (pfr0 >> 16 & 15) ? "+fp16" : "yes",
+	    (pfr0 >> 20 & 15) == 15 ? "no" : (pfr0 >> 20 & 15) ? "+fp16" : "yes");
+	say("ISAR0       %08lx  (AES %s, SHA1 %s, SHA2 %s, CRC32 %s, atomics %s, dot %s)\n", isar0,
+	    (isar0 >> 4 & 15) >= 2 ? "+pmull" : (isar0 >> 4 & 15) ? "yes" : "no",
+	    isar0 >> 8 & 15 ? "yes" : "no", isar0 >> 12 & 15 ? "yes" : "no",
+	    isar0 >> 16 & 15 ? "yes" : "no", isar0 >> 20 & 15 ? "yes" : "no",
+	    isar0 >> 44 & 15 ? "yes" : "no");
 	uint64_t clidr = READ_SYSREG(clidr_el1);
 	say("CLIDR       %08lx\n", clidr);
 	// Each cache's shape: CSSELR picks one, CCSIDR describes it
