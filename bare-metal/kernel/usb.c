@@ -111,7 +111,8 @@ static struct {
 	uint32_t address, config, alt;
 	uint8_t last_setup[8];
 	uint32_t frames_in, bytes_in, last_type, last_len, frames_too_big;
-	uint32_t notifies;
+	uint32_t notifies, notified;   // queued to the Mac, taken by it
+	uint32_t descs, set_ifaces, clears, classes;
 } st;
 
 // ---- descriptors --------------------------------------------------------------
@@ -290,14 +291,50 @@ static void endpoints_off(void)
 	w(DOEPCTL(EP_DATA), 0);
 }
 
-// Tell the Mac the cable is "plugged in": NETWORK_CONNECTION, value 1
-static void notify_connected(void)
+// Stop an IN endpoint's pending transfer and empty its FIFO: ask it to
+// NAK, wait until it does, disable it, wait, then flush
+static void ep_in_abort(uint32_t n)
 {
-	static const uint8_t msg[8] = { 0xa1, 0x00, W(1), W(0), W(0) };
-	w(DIEPTSIZ(EP_NOTIFY), 1U << 19 | 8);
+	if (r(DIEPCTL(n)) & EP_ENA) {
+		w(DIEPCTL(n), r(DIEPCTL(n)) | EP_SNAK);
+		wait_for(OTG + DIEPINT(n), 1U << 6, 1U << 6, 1000);   // NAK in effect
+		w(DIEPCTL(n), r(DIEPCTL(n)) | EP_DIS | EP_SNAK);
+		wait_for(OTG + DIEPINT(n), 1U << 1, 1U << 1, 1000);   // disabled
+		w(DIEPINT(n), 1U << 6 | 1U << 1);
+	}
+	w(GRSTCTL, n << 6 | 1U << 5);
+	wait_for(OTG + GRSTCTL, 1U << 5, 0, 1000);
+}
+
+// Tell the Mac the "cable" is plugged in: NETWORK_CONNECTION (value 1),
+// then CONNECTION_SPEED_CHANGE (480 Mbit/s each way). One at a time: the
+// next goes when the Mac has taken the last.
+static uint32_t notify_queue;   // bit 0: connection, bit 1: speed
+static int notify_busy;
+
+static void notify_kick(void)
+{
+	static const uint8_t connected[8] = { 0xa1, 0x00, W(1), W(0), W(0) };
+	static const uint8_t speed[16] = { 0xa1, 0x2a, W(0), W(0), W(8),
+		W(0x3800), W(0x1c9c), W(0x3800), W(0x1c9c) };   // 480,000,000
+	if (notify_busy || !notify_queue)
+		return;
+	const uint8_t *msg = notify_queue & 1 ? connected : speed;
+	uint32_t len = notify_queue & 1 ? 8 : 16;
+	notify_queue &= notify_queue & 1 ? ~1U : ~2U;
+	w(DIEPTSIZ(EP_NOTIFY), 1U << 19 | len);
 	w(DIEPCTL(EP_NOTIFY), r(DIEPCTL(EP_NOTIFY)) | EP_ENA | EP_CNAK);
-	fifo_write(EP_NOTIFY, msg, 8);
+	fifo_write(EP_NOTIFY, msg, len);
+	notify_busy = 1;
 	st.notifies++;
+}
+
+static void notify_restart(void)
+{
+	ep_in_abort(EP_NOTIFY);
+	notify_busy = 0;
+	notify_queue = st.alt ? 3 : 0;
+	notify_kick();
 }
 
 // ---- requests ------------------------------------------------------------------------
@@ -310,6 +347,7 @@ static void request(void)
 		st.last_setup[i] = (uint8_t)(setup[i / 4] >> (8 * (i % 4)));
 
 	if ((type & 0x60) == 0x20) {   // CDC class requests
+		st.classes++;
 		if (req == 0x43)           // SET_ETHERNET_PACKET_FILTER: fine
 			ep0_ack();
 		else
@@ -323,6 +361,7 @@ static void request(void)
 	switch (req) {
 	case 6: {   // GET_DESCRIPTOR
 		uint32_t kind = value >> 8, i = value & 0xff;
+		st.descs++;
 		if (kind == 1)
 			ep0_send(device_desc, sizeof device_desc);
 		else if (kind == 2)
@@ -344,6 +383,9 @@ static void request(void)
 		st.config = value & 0xff;
 		st.alt = 0;
 		endpoints_off();
+		ep_in_abort(EP_NOTIFY);
+		notify_busy = 0;
+		notify_queue = 0;
 		if (st.config)
 			w(DIEPCTL(EP_NOTIFY), EP_SNAK | EP_D0PID | (uint32_t)EP_NOTIFY << 22 | EP_INTR |
 			  EP_ACTIVE | 16);
@@ -354,14 +396,14 @@ static void request(void)
 		ep0_send(ep0_small, 1);
 		break;
 	case 11:    // SET_INTERFACE: data interface setting 1 = link up
+		st.set_ifaces++;
 		if (index == 1) {
-			st.alt = value;
-			if (value) {
+			if (value && !st.alt)
 				endpoints_on();
-				notify_connected();
-			} else {
+			else if (!value && st.alt)
 				endpoints_off();
-			}
+			st.alt = value;
+			notify_restart();
 		}
 		ep0_ack();
 		break;
@@ -373,7 +415,21 @@ static void request(void)
 		ep0_small[0] = ep0_small[1] = 0;
 		ep0_send(ep0_small, 2);
 		break;
-	case 1:     // CLEAR_FEATURE
+	case 1:     // CLEAR_FEATURE: on an endpoint, "un-halt" it, which also
+		        // restarts its packet sequence at DATA0
+		st.clears++;
+		if ((type & 0x1f) == 2 && value == 0) {
+			uint32_t n = index & 0xf;
+			if (index & 0x80) {
+				w(DIEPCTL(n), (r(DIEPCTL(n)) & ~EP_STALL) | EP_D0PID);
+				if (n == EP_NOTIFY)
+					notify_restart();
+			} else if (n) {
+				w(DOEPCTL(n), (r(DOEPCTL(n)) & ~EP_STALL) | EP_D0PID);
+			}
+		}
+		ep0_ack();
+		break;
 	case 3:     // SET_FEATURE
 		ep0_ack();
 		break;
@@ -390,6 +446,8 @@ static void on_reset(void)
 	w(DCFG, r(DCFG) & ~(0x7fU << 4));
 	endpoints_off();
 	w(DIEPCTL(EP_NOTIFY), 0);
+	notify_busy = 0;
+	notify_queue = 0;
 	w(GRSTCTL, 0x10U << 6 | 1U << 5);   // flush every transmit FIFO
 	wait_for(OTG + GRSTCTL, 1U << 5, 0, 1000);
 	ep0_out_arm();
@@ -496,8 +554,15 @@ void usb_poll(void)
 		if (i & 1)
 			frame_done();
 	}
-	if (daint & (1U << EP_NOTIFY))
-		w(DIEPINT(EP_NOTIFY), r(DIEPINT(EP_NOTIFY)));
+	if (daint & (1U << EP_NOTIFY)) {         // the Mac took a notification
+		uint32_t i = r(DIEPINT(EP_NOTIFY));
+		w(DIEPINT(EP_NOTIFY), i);
+		if (i & 1) {
+			st.notified++;
+			notify_busy = 0;
+			notify_kick();
+		}
+	}
 	if (daint & (1U << EP_DATA))
 		w(DIEPINT(EP_DATA), r(DIEPINT(EP_DATA)));
 }
@@ -656,6 +721,10 @@ void usb_page(void)
 	kprintf("%u, config %u, link %s   \n", st.address, st.config, st.alt ? "up" : "down");
 	label("Requests");
 	kprintf("%u, %u refused   \n", st.setups, st.stalls);
+	label("");
+	kprintf("%u desc %u alt %u clear %u CDC  \n", st.descs, st.set_ifaces, st.clears, st.classes);
+	label("Notified");
+	kprintf("%u sent, %u taken   \n", st.notifies, st.notified);
 	label("Last");
 	for (int i = 0; i < 8; i++)
 		kprintf("%02x", st.last_setup[i]);
