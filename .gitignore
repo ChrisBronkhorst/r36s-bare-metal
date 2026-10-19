@@ -36,3 +36,9 @@ bare-metal/ddr/*.o
 bare-metal/ddr/ddr.elf
 bare-metal/ddr/ddr.bin
 bare-metal/spl/idbloader-ours.img
+
+# Boot ROM and RAM dumps: Rockchip code, kept local only
+bare-metal/kernel/dumps/
+
+# Mesa source clone (built by build-mesa.sh), its own repo
+bare-metal/gpu/mesa
