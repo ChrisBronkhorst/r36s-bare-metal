@@ -1,6 +1,8 @@
 # Build kernel.img for the R36S (RK3326, 64-bit ARM).
 #   make          build kernel.img
-#   make push     send it to the running console over USB and start it
+#   make push     send it to the running console over USB, save it to the
+#                 card, and start it
+#   make try      the same, but RAM only: the card keeps its kernel
 #   make dump     show the disassembly
 #   make clean
 
@@ -44,10 +46,13 @@ sd.o: ../spl/sd.c ../spl/sd.h
 push: kernel.img
 	python3 -I push.py kernel.img
 
+try: kernel.img
+	python3 -I push.py --try kernel.img
+
 dump: kernel.elf
 	objdump -d kernel.elf
 
 clean:
 	rm -f *.o kernel.elf kernel.img uboot.img
 
-.PHONY: push dump clean
+.PHONY: push try dump clean

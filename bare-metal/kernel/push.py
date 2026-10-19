@@ -2,6 +2,12 @@
 """Send a kernel to the running console over the USB network and start it.
 
     python3 push.py kernel.img          (or: make push)
+    python3 push.py --try kernel.img    (or: make try) RAM only, not saved
+
+By default the console also saves it to the card, so it's the kernel the
+next power-on starts: we send the 2 KB LOADER header that goes in front of
+it there (pack-loader.py makes it), and the console writes both and reads
+them back before switching.
 
 The console's loader (loader.c) listens on UDP port 5001 at 192.168.36.1.
 Each packet is 16 bytes of header, little-endian: magic "KPSH", kind
@@ -18,19 +24,32 @@ import sys
 import time
 import zlib
 
+import importlib.util
+
 CONSOLE = ("192.168.36.1", 5001)
 MAGIC = 0x4853504B  # "KPSH"
-START, DATA, GO = 1, 2, 3
+START, DATA, GO, HEADER = 1, 2, 3, 4
 PIECE = 1400
 STATUS = {0: "ok", 1: "too big", 2: "bad piece", 3: "bad CRC",
-          4: "not an ARM64 kernel image", 5: "no start (did the console reboot?)"}
+          4: "not an ARM64 kernel image", 5: "no start (did the console reboot?)",
+          6: "LOADER header doesn't match the kernel", 7: "card failed (see the log)",
+          8: "the card has no kernel at sector 16384, so not writing there"}
 
 
-def ask(sock, kind, a, b, payload=b"", tries=20):
+def loader_header(image):
+    # pack-loader.py's own code, so both ways of installing agree
+    here = __file__.rsplit("/", 1)[0] if "/" in __file__ else "."
+    spec = importlib.util.spec_from_file_location("pack_loader", here + "/pack-loader.py")
+    pack_loader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pack_loader)
+    return pack_loader.pack(image, copies=1)[:2048]
+
+
+def ask(sock, kind, a, b, payload=b"", tries=20, wait=0.2):
     packet = struct.pack("<IIII", MAGIC, kind, a, b) + payload
     for _ in range(tries):
         sock.sendto(packet, CONSOLE)
-        deadline = time.time() + 0.2
+        deadline = time.time() + wait
         while time.time() < deadline:
             try:
                 reply, _ = sock.recvfrom(64)
@@ -45,8 +64,12 @@ def ask(sock, kind, a, b, payload=b"", tries=20):
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else "kernel.img"
+    args = sys.argv[1:]
+    keep = "--try" not in args
+    args = [a for a in args if a != "--try"]
+    path = args[0] if args else "kernel.img"
     image = open(path, "rb").read()
+    image += b"\0" * (-len(image) % 4)   # as on the card
     crc = zlib.crc32(image)
 
     # The log listener first, so we don't miss the new kernel's first lines.
@@ -68,12 +91,20 @@ def main():
         status = ask(sock, DATA, offset, len(piece), piece)
         if status:
             sys.exit(f"push: piece at {offset} refused: {STATUS.get(status, status)}")
+    if keep:
+        header = loader_header(image)
+        for offset in (0, 1024):
+            status = ask(sock, HEADER, offset, 1024, header[offset:offset + 1024])
+            if status:
+                sys.exit(f"push: header refused: {STATUS.get(status, status)}")
     took = time.time() - t
-    status = ask(sock, GO, 0, 0)
+    # Writing the card takes a moment: wait longer for this answer
+    status = ask(sock, GO, 0, 0, tries=10, wait=2)
     if status:
         sys.exit(f"push: refused to start it: {STATUS.get(status, status)}")
-    print(f"push: {len(image)} bytes in {took * 1000:.0f} ms, CRC {crc:08x}: "
-          "the new kernel is starting")
+    print(f"push: {len(image)} bytes in {took * 1000:.0f} ms, CRC {crc:08x}, "
+          + ("saved to the card" if keep else "not saved (RAM only)")
+          + ": the new kernel is starting")
 
     # Its log: from start-up until it's back on the network
     end = time.time() + 8
