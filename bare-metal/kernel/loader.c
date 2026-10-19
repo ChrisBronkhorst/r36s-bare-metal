@@ -17,6 +17,10 @@
 // jumping, we check the header describes exactly what we received, write
 // both to the card where the SPL looks (sector 16384), and read it back.
 // Only if all of that worked do we start the new kernel.
+//
+// The start packet may name a different target after its 16 bytes: 1 =
+// the monitor's "trust" image (make monitor). That one is only written to
+// the card, never started: it runs from the next boot.
 
 #include <stdint.h>
 #include "console.h"
@@ -50,10 +54,15 @@
 #define NOT_OURS  8
 
 #define LOADER_SECTOR 16384   // as in the SPL
+#define TRUST_SECTOR  24576   // the monitor: 2 copies, 2 MB (4096 sectors) apart
+#define TRUST_BYTES   (64 * 1024)   // what we write of each copy
+#define KERNEL  0
+#define MONITOR 1
 
 static struct {
 	uint32_t size, crc, received, pieces, pushes, last_status;
 	int expecting;
+	uint32_t target;
 	uint32_t header_got;   // bytes of header received (2048 = all)
 	const char *card;      // what happened at the last save
 } st;
@@ -106,6 +115,40 @@ static int is_loader(const uint8_t *p)
 	return 1;
 }
 
+// The monitor's image onto the card: both copies. 0, or what went wrong.
+static uint32_t save_monitor(uint8_t *image)
+{
+	// "BL3X", then one or more parts; the first must be "BL31", the monitor
+	uint32_t size_word = get32(image + 12), table = (size_word & 0xffff) * 4 + 256;
+	if (st.size > TRUST_BYTES || get32(image) != 0x58334c42 || (size_word >> 16) < 1 ||
+	    table + 16 > 2048 || get32(image + table) != 0x31334c42)
+		return st.card = "not a trust image with a BL31 part", BAD_HEADER;
+	for (uint32_t i = st.size; i < TRUST_BYTES; i++)
+		image[i] = 0;   // the rest of what we write: zeros
+	if (sd_init())
+		return st.card = "card didn't start", CARD_FAILED;
+	for (uint32_t copy = 0; copy < 2; copy++) {
+		uint32_t at = TRUST_SECTOR + copy * 4096;
+		// Only over a monitor already there
+		if (sd_read(at, 1, sector))
+			return st.card = "card read failed", CARD_FAILED;
+		if (sector[0] != 0x58334c42)
+			return st.card = "no trust image there", NOT_OURS;
+		if (sd_write(at, TRUST_BYTES / 512, image))
+			return st.card = "card write failed", CARD_FAILED;
+		for (uint32_t s = 0; s < TRUST_BYTES / 512; s++) {
+			if (sd_read(at + s, 1, sector))
+				return st.card = "read-back failed", CARD_FAILED;
+			const uint8_t *got = (const uint8_t *)sector;
+			for (uint32_t i = 0; i < 512; i++)
+				if (got[i] != image[s * 512 + i])
+					return st.card = "read back differs", CARD_FAILED;
+		}
+	}
+	st.card = "monitor saved";
+	return OK;
+}
+
 // Header and kernel onto the card. 0, or what went wrong.
 static uint32_t save(const uint8_t *kernel)
 {
@@ -154,7 +197,13 @@ uint32_t loader_packet(const uint8_t *data, uint32_t len, uint8_t *reply, int *g
 		} else {
 			st.size = a, st.crc = b, st.received = 0, st.pieces = 0;
 			st.expecting = 1, st.header_got = 0;
-			klog("loader: receiving a kernel, %u bytes", a);
+			st.target = len >= 20 ? get32(data + 16) : KERNEL;
+			if (st.target > MONITOR) {
+				status = BAD_PIECE;
+				st.expecting = 0;
+			} else
+				klog("loader: receiving a %s, %u bytes",
+				     st.target == MONITOR ? "monitor" : "kernel", a);
 		}
 	} else if (kind == DATA) {
 		if (!st.expecting)
@@ -190,7 +239,12 @@ uint32_t loader_packet(const uint8_t *data, uint32_t len, uint8_t *reply, int *g
 			status = NO_START;
 		else if (crc32(dst, st.size) != st.crc)
 			status = BAD_CRC;
-		else if (st.size < 64 || get32(dst + 56) != 0x644d5241)   // "ARM\x64"
+		else if (st.target == MONITOR) {
+			status = save_monitor(dst);
+			klog("loader: %s", st.card);
+			// No jump: it runs from the next boot. (A repeated "go", if our
+			// answer got lost, just writes the same again.)
+		} else if (st.size < 64 || get32(dst + 56) != 0x644d5241)   // "ARM\x64"
 			status = NOT_ARM64;
 		else if (st.header_got == sizeof header && (status = save(dst)) != OK)
 			klog("loader: not saved to the card: %s", st.card);

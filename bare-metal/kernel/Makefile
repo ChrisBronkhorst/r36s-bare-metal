@@ -4,6 +4,8 @@
 #                 card, and start it
 #   make try      the same, but RAM only: the card keeps its kernel
 #   make reboot   restart the console (it starts from the card)
+#   make monitor  write our EL3 monitor (../monitor) to the card; it runs
+#                 from the next boot
 #   make shell    type commands to the running console (./shell.py CMD: one)
 #   make dump     show the disassembly
 #   make clean
@@ -58,6 +60,10 @@ try: kernel.img
 reboot:
 	python3 -I push.py --reboot
 
+monitor:
+	$(MAKE) -C ../monitor trust.img
+	python3 -I push.py --monitor ../monitor/trust.img
+
 shell:
 	python3 -I shell.py
 
@@ -67,4 +73,4 @@ dump: kernel.elf
 clean:
 	rm -f *.o kernel.elf kernel.img uboot.img
 
-.PHONY: push try reboot shell dump clean
+.PHONY: push try reboot shell monitor dump clean

@@ -4,6 +4,8 @@
     python3 push.py kernel.img          (or: make push)
     python3 push.py --try kernel.img    (or: make try) RAM only, not saved
     python3 push.py --reboot            (or: make reboot) restart the console
+    python3 push.py --monitor ../monitor/trust.img   (or: make monitor)
+        write our EL3 monitor to the card; it runs from the next boot
 
 By default the console also saves it to the card, so it's the kernel the
 next power-on starts: we send the 2 KB LOADER header that goes in front of
@@ -88,8 +90,40 @@ def listen_log():
     return log
 
 
+def push_monitor(path):
+    # One copy of the trust image, without the padding: its 2 KB header and
+    # the parts after it, as far as there's anything but zeros
+    image = open(path, "rb").read()[:2 << 20].rstrip(b"\0")
+    image += b"\0" * (-len(image) % 512)
+    if image[:4] != b"BL3X":
+        sys.exit(f"push: {path} isn't a trust image")
+    crc = zlib.crc32(image)
+    log = listen_log()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(0.2)
+    status = ask(sock, START, len(image), crc, struct.pack("<I", 1))
+    if status:
+        sys.exit(f"push: refused: {STATUS.get(status, status)}")
+    for offset in range(0, len(image), PIECE):
+        piece = image[offset:offset + PIECE]
+        status = ask(sock, DATA, offset, len(piece), piece)
+        if status:
+            sys.exit(f"push: piece at {offset} refused: {STATUS.get(status, status)}")
+    status = ask(sock, GO, 0, 0, tries=10, wait=2)
+    show_log(log, 1)
+    if status == 4:
+        sys.exit("push: the console's kernel doesn't know about monitors yet: make try first")
+    if status:
+        sys.exit(f"push: monitor not saved: {STATUS.get(status, status)}")
+    print(f"push: monitor ({len(image)} bytes, CRC {crc:08x}) saved to the card, "
+          "both copies: it runs from the next boot (make reboot)")
+
+
 def main():
     args = sys.argv[1:]
+    if "--monitor" in args:
+        rest = [a for a in args if a != "--monitor"]
+        return push_monitor(rest[0] if rest else "../monitor/trust.img")
     if "--reboot" in args:
         log = listen_log()
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
